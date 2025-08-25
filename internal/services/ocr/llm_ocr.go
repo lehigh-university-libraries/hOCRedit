@@ -314,9 +314,9 @@ func (s *LLMOCRService) createTextOverlayImage(imagePath string, response models
 	
 	// Process each detected line
 	lineNumber := 1
-	for _, page := range response.Responses[0].FullTextAnnotation.Pages {
-		for _, block := range page.Blocks {
-			for _, paragraph := range block.Paragraphs {
+	for pn, page := range response.Responses[0].FullTextAnnotation.Pages {
+		for ln, block := range page.Blocks {
+			for wn, paragraph := range block.Paragraphs {
 				// Group words by their Y position to detect actual text lines
 				lines := s.groupWordsByLine(paragraph.Words)
 				
@@ -332,10 +332,12 @@ func (s *LLMOCRService) createTextOverlayImage(imagePath string, response models
 					}
 					
 					// Create opening span tag image
-					openingTag := fmt.Sprintf(`<span class='ocrx_line' title='bbox %d %d %d %d'>
-					    <span class='ocrx_word' id='word_1' title='bbox %d %d %d %d'>`, 
+					openingTag := fmt.Sprintf(`<span class='ocrx_line' id='line_%d' title='bbox %d %d %d %d'>
+<span class='ocrx_word' id='word_%d' title='bbox %d %d %d %d'>`, 
+            ln,
 						lineBBox.Vertices[0].X, lineBBox.Vertices[0].Y, 
 						lineBBox.Vertices[2].X, lineBBox.Vertices[2].Y,
+						wn,
   					lineBBox.Vertices[0].X, lineBBox.Vertices[0].Y,
 						lineBBox.Vertices[2].X, lineBBox.Vertices[2].Y)
 					openingImagePath, err := s.createTextImage(openingTag, tempDir, fmt.Sprintf("opening_%d", lineNumber))
@@ -486,8 +488,8 @@ func (s *LLMOCRService) getTextFromLLM(stitchedImagePath string) (string, error)
 						Text: `Read and transcribe all the hOCR markup that has been overlaid on this image.
 						The image contains complete hOCR markup overlaid in a clear, readable font.
 						Each line shows hOCR tags with text content like:
-						<span class='ocrx_line' id='line_1' title='bbox=x y w h'>
-					    <span class='ocrx_word' id='word_1' title='bbox x y w h'>
+						<span class='ocrx_line' id='line_X' title='bbox=x y w h'>
+					    <span class='ocrx_word' id='word_X' title='bbox x y w h'>
 						followed by an image that needs transcribed.
 						When you print you span tags, the span must always start with
 						"<span class='ocrx_line'" OR "<span class='ocrx_word'"
