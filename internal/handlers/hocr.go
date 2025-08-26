@@ -5,8 +5,8 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/lehigh-university-libraries/hOCRedit/internal/hocr"
 	"github.com/lehigh-university-libraries/hOCRedit/internal/models"
-	"github.com/lehigh-university-libraries/hOCRedit/pkg/hocr/parser"
 )
 
 func (h *Handler) HandleHOCRUpdate(w http.ResponseWriter, r *http.Request) {
@@ -58,7 +58,7 @@ func (h *Handler) HandleHOCRParse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	words, err := parser.ParseHOCRWords(request.HOCR)
+	words, err := hocr.ParseHOCRWords(request.HOCR)
 	if err != nil {
 		slog.Error("Unable to parse hocr", "hocr", request.HOCR, "err", err)
 		h.writeError(w, "Failed to parse hOCR: "+err.Error(), http.StatusBadRequest)

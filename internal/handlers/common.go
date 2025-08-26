@@ -8,14 +8,14 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/lehigh-university-libraries/hOCRedit/internal/hocr"
 	"github.com/lehigh-university-libraries/hOCRedit/internal/models"
-	"github.com/lehigh-university-libraries/hOCRedit/internal/services/ocr"
 	"github.com/lehigh-university-libraries/hOCRedit/internal/storage"
 )
 
 type Handler struct {
 	sessionStore *storage.SessionStore
-	ocrService   *ocr.Service
+	hocrService  *hocr.Service
 }
 
 type ImageProcessResult struct {
@@ -37,7 +37,7 @@ type SessionConfig struct {
 func New() *Handler {
 	return &Handler{
 		sessionStore: storage.New(),
-		ocrService:   ocr.New(),
+		hocrService:  hocr.NewService(),
 	}
 }
 
@@ -109,5 +109,5 @@ func (h *Handler) createImageSession(sessionID string, result *ImageProcessResul
 
 func (h *Handler) getOCRForImage(imagePath string) (string, error) {
 	// Use the simplified OCR service that bundles word detection + ChatGPT transcription
-	return h.ocrService.ProcessImageToHOCR(imagePath)
+	return h.hocrService.ProcessImageToHOCR(imagePath)
 }

@@ -248,14 +248,6 @@ func (h *Converter) calculateLineBoundingBox(words []models.Word) models.BBox {
 	return models.BBox{X1: minX, Y1: minY, X2: maxX, Y2: maxY}
 }
 
-// Add abs helper function if not already present
-func abs(x int) int {
-	if x < 0 {
-		return -x
-	}
-	return x
-}
-
 func (h *Converter) convertOCRWordToHOCRWord(ocrWord models.Word, lineID string) models.HOCRWord {
 	var text strings.Builder
 	for _, symbol := range ocrWord.Symbols {
