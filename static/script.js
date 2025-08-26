@@ -1,5 +1,12 @@
+// ============================================================================
+// GLOBAL STATE VARIABLES
+// ============================================================================
+
+// Session and image state
 let currentSession = null;
 let currentImageIndex = 0;
+
+// hOCR data and navigation state
 let hocrData = null;
 let selectedWordId = null;
 let currentWordIndex = -1;
@@ -7,32 +14,29 @@ let currentLineWords = [];
 let currentLineId = null;
 let allLines = [];
 let currentLineIndex = -1;
-let imageScale = 1;
-let showLowConfidence = false;
 
-// Drawing mode variables
+// Drawing mode state
 let drawingMode = false;
 let isDrawing = false;
 let drawingStart = null;
 let currentDrawingBox = null;
 let pendingAnnotation = null;
 
-// Load sessions and check URL parameters on page load
+// ============================================================================
+// INITIALIZATION AND EVENT HANDLERS
+// ============================================================================
+
 document.addEventListener("DOMContentLoaded", function () {
-  // Check for session parameter first
   const urlParams = new URLSearchParams(window.location.search);
   const sessionParam = urlParams.get("session");
 
   if (sessionParam) {
-    // Load the specific session
     loadSession(sessionParam);
   } else {
-    // Load sessions list as usual
     loadSessions();
   }
 });
 
-// Global keyboard event listener for navigation
 document.addEventListener("keydown", function (e) {
   // Only handle navigation when correction interface is visible
   if (
@@ -90,7 +94,10 @@ document.addEventListener("keydown", function (e) {
   }
 });
 
-// Drawing mode functions
+// ============================================================================
+// DRAWING MODE FUNCTIONS
+// ============================================================================
+
 function toggleDrawingMode() {
   drawingMode = !drawingMode;
   const btn = document.getElementById("drawing-mode-btn");
@@ -362,11 +369,14 @@ function closeAnnotationModal() {
   document.getElementById("annotation-text").onkeydown = null;
 }
 
+// ============================================================================
+// NAVIGATION FUNCTIONS
+// ============================================================================
+
 function navigateToNextWord() {
   if (!hocrData || !hocrData.words || hocrData.words.length === 0) return;
 
-  // If we have line context and we're not at the last word in the line,
-  // navigate within the line first
+  // Navigate within line first, then globally
   if (currentLineWords.length > 0 && selectedWordId) {
     const currentWordIndexInLine = currentLineWords.findIndex(
       (w) => w.id === selectedWordId
@@ -375,7 +385,6 @@ function navigateToNextWord() {
       currentWordIndexInLine !== -1 &&
       currentWordIndexInLine < currentLineWords.length - 1
     ) {
-      // Move to next word in same line
       const nextWord = currentLineWords[currentWordIndexInLine + 1];
       const globalIndex = hocrData.words.findIndex((w) => w.id === nextWord.id);
       currentWordIndex = globalIndex;
@@ -384,8 +393,6 @@ function navigateToNextWord() {
       return;
     }
   }
-
-  // Normal global navigation
   currentWordIndex = (currentWordIndex + 1) % hocrData.words.length;
   selectWordByIndex(currentWordIndex);
   scrollWordIntoView();
@@ -394,14 +401,12 @@ function navigateToNextWord() {
 function navigateToPreviousWord() {
   if (!hocrData || !hocrData.words || hocrData.words.length === 0) return;
 
-  // If we have line context and we're not at the first word in the line,
-  // navigate within the line first
+  // Navigate within line first, then globally
   if (currentLineWords.length > 0 && selectedWordId) {
     const currentWordIndexInLine = currentLineWords.findIndex(
       (w) => w.id === selectedWordId
     );
     if (currentWordIndexInLine > 0) {
-      // Move to previous word in same line
       const prevWord = currentLineWords[currentWordIndexInLine - 1];
       const globalIndex = hocrData.words.findIndex((w) => w.id === prevWord.id);
       currentWordIndex = globalIndex;
@@ -410,8 +415,6 @@ function navigateToPreviousWord() {
       return;
     }
   }
-
-  // Normal global navigation
   currentWordIndex =
     currentWordIndex <= 0 ? hocrData.words.length - 1 : currentWordIndex - 1;
   selectWordByIndex(currentWordIndex);
@@ -425,7 +428,7 @@ function selectWordByIndex(index) {
   selectWord(word.id);
   updateWordCounter();
 
-  // Focus the word input for immediate editing
+  // Auto-focus for immediate editing
   setTimeout(() => {
     const wordInput = document.getElementById("word-text");
     if (wordInput) {
@@ -438,7 +441,6 @@ function selectWordByIndex(index) {
 function navigateToLineAbove() {
   if (!allLines || allLines.length === 0 || currentLineIndex <= 0) return;
 
-  // Navigate to previous line
   currentLineIndex--;
   const targetLine = allLines[currentLineIndex];
 
@@ -456,7 +458,6 @@ function navigateToLineBelow() {
   )
     return;
 
-  // Navigate to next line
   currentLineIndex++;
   const targetLine = allLines[currentLineIndex];
 
@@ -475,14 +476,12 @@ function scrollLineIntoView() {
     const containerRect = imageContainer.getBoundingClientRect();
     const lineRect = lineBox.getBoundingClientRect();
 
-    // Check if line is outside visible area
     if (
       lineRect.top < containerRect.top ||
       lineRect.bottom > containerRect.bottom ||
       lineRect.left < containerRect.left ||
       lineRect.right > containerRect.right
     ) {
-      // Calculate scroll position to center the line
       const scrollTop =
         imageContainer.scrollTop +
         lineRect.top -
@@ -503,7 +502,7 @@ function scrollLineIntoView() {
   }
 }
 
-// Keep the old function name for compatibility but redirect to line scrolling
+// Compatibility wrapper
 function scrollWordIntoView() {
   scrollLineIntoView();
 }
@@ -520,17 +519,12 @@ function updateWordCounter() {
 }
 
 function clearSelection() {
-  selectedWordId = null;
-  currentWordIndex = -1;
-  currentLineWords = [];
-  currentLineId = null;
-  currentLineIndex = -1;
+  resetNavigationState();
 
   document.querySelectorAll(".hocr-line-box").forEach((box) => {
     box.classList.remove("selected", "adjacent-clickable");
   });
 
-  // Deactivate dimming overlay and reset clip-path
   const dimmingOverlay = document.getElementById("dimming-overlay");
   if (dimmingOverlay) {
     dimmingOverlay.classList.remove("active");
@@ -542,13 +536,25 @@ function clearSelection() {
   updateWordCounter();
 }
 
+function resetNavigationState() {
+  selectedWordId = null;
+  currentWordIndex = -1;
+  currentLineWords = [];
+  currentLineId = null;
+  currentLineIndex = -1;
+}
+
 function applyWordChanges() {
   if (selectedWordId) {
     updateSelectedWord();
-    // Auto-advance to next word after applying changes
+    // Auto-advance after editing
     setTimeout(() => navigateToNextWord(), 100);
   }
 }
+
+// ============================================================================
+// SESSION AND FILE MANAGEMENT
+// ============================================================================
 
 async function loadSessions() {
   try {
@@ -594,7 +600,6 @@ async function handleUpload() {
     return;
   }
 
-  // Show upload progress
   const uploadArea = document.getElementById("upload-area");
   uploadArea.innerHTML =
     "<h3>Processing files...</h3><p>Please wait while files are uploaded and processed with OCR.</p>";
@@ -626,7 +631,6 @@ async function handleUpload() {
     console.error("Upload error:", error);
     alert("Upload failed: " + error.message);
 
-    // Reset upload area
     resetUploadArea();
   }
 }
@@ -640,7 +644,6 @@ async function handleUrlUpload() {
     return;
   }
 
-  // Basic URL validation
   try {
     new URL(imageUrl);
   } catch {
@@ -648,7 +651,6 @@ async function handleUrlUpload() {
     return;
   }
 
-  // Show upload progress
   const uploadArea = document.getElementById("upload-area");
   uploadArea.innerHTML =
     "<h3>Processing image URL...</h3><p>Please wait while the image is downloaded and processed with OCR.</p>";
@@ -679,8 +681,6 @@ async function handleUrlUpload() {
   } catch (error) {
     console.error("URL processing error:", error);
     alert("URL processing failed: " + error.message);
-
-    // Reset upload area
     resetUploadArea();
   }
 }
@@ -715,7 +715,6 @@ async function saveToIslandora() {
     return;
   }
 
-  // Check if this is a Drupal session by looking for the upload URL
   const isDrupalSession =
     currentSession.images &&
     currentSession.images.length > 0 &&
@@ -726,14 +725,12 @@ async function saveToIslandora() {
     return;
   }
 
-  // Get current HOCR data
   const hocrData = getCurrentHOCR();
   if (!hocrData) {
     alert("No HOCR data to save");
     return;
   }
 
-  // Show loading state
   const button = document.getElementById("save-islandora-btn");
   const originalText = button.textContent;
   button.textContent = "Saving...";
@@ -764,14 +761,12 @@ async function saveToIslandora() {
     console.error("Islandora upload error:", error);
     alert("Failed to save to Islandora: " + error.message);
   } finally {
-    // Reset button state
     button.textContent = originalText;
     button.disabled = false;
   }
 }
 
 function getCurrentHOCR() {
-  // Generate HOCR from current session data
   if (
     !currentSession ||
     !currentSession.images ||
@@ -785,7 +780,6 @@ function getCurrentHOCR() {
 }
 
 function checkForDrupalSession() {
-  // Show/hide the Islandora button based on session type
   const button = document.getElementById("save-islandora-btn");
   if (!button) return;
 
@@ -826,7 +820,6 @@ async function loadCurrentImage() {
     return;
   }
 
-  // Disable drawing mode when switching images
   if (drawingMode) {
     toggleDrawingMode();
   }
@@ -835,23 +828,22 @@ async function loadCurrentImage() {
   const img = document.getElementById("current-image");
 
   img.onload = function () {
-    // Parse hOCR and create overlay
     parseAndDisplayHOCR(image.corrected_hocr || image.original_hocr);
     updateProgress();
     updateMetrics();
 
-    // Reset navigation state for new image
-    currentWordIndex = -1;
-    selectedWordId = null;
-    currentLineWords = [];
-    currentLineId = null;
+    resetNavigationState();
     allLines = [];
-    currentLineIndex = -1;
     clearSelection();
   };
 
   img.src = image.image_url || "/static/uploads/" + image.image_path;
 }
+
+// ============================================================================
+// hOCR PARSING AND RENDERING
+// ============================================================================
+
 async function parseAndDisplayHOCR(hocrXML) {
   try {
     const response = await fetch("api/hocr/parse", {
@@ -861,59 +853,59 @@ async function parseAndDisplayHOCR(hocrXML) {
     });
     hocrData = await response.json();
 
-    // Sort words by reading order and renumber them sequentially
     if (hocrData && hocrData.words) {
       renumberWordIds();
-
-      // Ensure all words have proper array-format bboxes and line_ids
-      hocrData.words.forEach((word, index) => {
-        // Fix bbox format
-        if (
-          word.bbox &&
-          typeof word.bbox === "object" &&
-          !Array.isArray(word.bbox)
-        ) {
-          // Convert object format {x1, y1, x2, y2} to array format [x1, y1, x2, y2]
-          word.bbox = [
-            word.bbox.x1 || word.bbox[0] || 0,
-            word.bbox.y1 || word.bbox[1] || 0,
-            word.bbox.x2 || word.bbox[2] || 0,
-            word.bbox.y2 || word.bbox[3] || 0,
-          ];
-        }
-
-        // Ensure bbox is valid array with 4 numeric values
-        if (!Array.isArray(word.bbox) || word.bbox.length !== 4) {
-          console.error("Invalid bbox format for word:", word);
-          word.bbox = [0, 0, 100, 20]; // fallback bbox
-        }
-
-        // Ensure all bbox values are numbers
-        word.bbox = word.bbox.map((val) => {
-          const num = parseInt(val, 10);
-          return isNaN(num) ? 0 : num;
-        });
-
-        // Fix line_id issues
-        if (!word.line_id && word.LineID) {
-          word.line_id = word.LineID;
-        }
-        if (!word.line_id) {
-          // Generate a line_id if missing
-          word.line_id = `line_${index + 1}`;
-        }
-
-        // Ensure confidence is a number
-        if (typeof word.confidence !== "number") {
-          word.confidence = parseFloat(word.confidence) || 95;
-        }
-      });
+      normalizeWordData();
     }
 
     renderHOCROverlay();
     updateWordCounter();
   } catch (error) {
     console.error("Error parsing hOCR:", error);
+  }
+}
+
+function normalizeWordData() {
+  hocrData.words.forEach((word, index) => {
+    normalizeBoundingBox(word);
+    normalizeLineId(word, index);
+    normalizeConfidence(word);
+  });
+}
+
+function normalizeBoundingBox(word) {
+  if (word.bbox && typeof word.bbox === "object" && !Array.isArray(word.bbox)) {
+      word.bbox = [
+      word.bbox.x1 || word.bbox[0] || 0,
+      word.bbox.y1 || word.bbox[1] || 0,
+      word.bbox.x2 || word.bbox[2] || 0,
+      word.bbox.y2 || word.bbox[3] || 0,
+    ];
+  }
+
+  if (!Array.isArray(word.bbox) || word.bbox.length !== 4) {
+    console.error("Invalid bbox format for word:", word);
+    word.bbox = [0, 0, 100, 20];
+  }
+
+  word.bbox = word.bbox.map((val) => {
+    const num = parseInt(val, 10);
+    return isNaN(num) ? 0 : num;
+  });
+}
+
+function normalizeLineId(word, index) {
+  if (!word.line_id && word.LineID) {
+    word.line_id = word.LineID;
+  }
+  if (!word.line_id) {
+    word.line_id = `line_${index + 1}`;
+  }
+}
+
+function normalizeConfidence(word) {
+  if (typeof word.confidence !== "number") {
+    word.confidence = parseFloat(word.confidence) || 95;
   }
 }
 
@@ -925,7 +917,6 @@ function renderHOCROverlay() {
 
   if (!hocrData || !hocrData.words) return;
 
-  // Wait for image to load to get dimensions
   if (img.naturalWidth === 0) {
     img.onload = renderHOCROverlay;
     return;
@@ -934,10 +925,7 @@ function renderHOCROverlay() {
   const scaleX = img.clientWidth / img.naturalWidth;
   const scaleY = img.clientHeight / img.naturalHeight;
 
-  // Update line data to ensure we have current line information
   updateLineData();
-
-  // Create line boxes instead of word boxes
   allLines.forEach((line, lineIndex) => {
     const lineBox = document.createElement("div");
     lineBox.className = "hocr-line-box";
@@ -945,16 +933,12 @@ function renderHOCROverlay() {
     lineBox.setAttribute("data-line-index", lineIndex);
     lineBox.setAttribute("data-line-id", line.id);
 
-    // Calculate line bounding box from all words in the line
     const lineBBox = calculateLineBoundingBox(line.words);
-
-    // Scale bounding box to image display size
     lineBox.style.left = lineBBox.x1 * scaleX + "px";
     lineBox.style.top = lineBBox.y1 * scaleY + "px";
     lineBox.style.width = (lineBBox.x2 - lineBBox.x1) * scaleX + "px";
     lineBox.style.height = (lineBBox.y2 - lineBBox.y1) * scaleY + "px";
 
-    // Apply confidence-based styling
     const avgConf = line.avgConfidence;
     if (avgConf < 60) {
       lineBox.classList.add("low-confidence");
@@ -980,13 +964,11 @@ function calculateLineBoundingBox(words) {
     return { x1: 0, y1: 0, x2: 0, y2: 0 };
   }
 
-  // Sort words by X position (left to right reading order)
   const sortedWords = [...words].sort((a, b) => a.bbox[0] - b.bbox[0]);
 
   const firstWord = sortedWords[0];
   const lastWord = sortedWords[sortedWords.length - 1];
 
-  // Get Y bounds from all words to handle slight vertical variations
   let minY = Infinity,
     maxY = -Infinity;
   words.forEach((word) => {
@@ -998,12 +980,11 @@ function calculateLineBoundingBox(words) {
     maxY = Math.max(maxY, y2);
   });
 
-  // Line extends from start of first word to end of last word
   return {
-    x1: firstWord.bbox[0], // Left edge of first word
-    y1: minY, // Top of highest word
-    x2: lastWord.bbox[2], // Right edge of last word
-    y2: maxY, // Bottom of lowest word
+    x1: firstWord.bbox[0],
+    y1: minY,
+    x2: lastWord.bbox[2],
+    y2: maxY,
   };
 }
 
@@ -1020,19 +1001,15 @@ function selectLine(lineId, lineIndex) {
     currentLineId = lineId;
     currentLineIndex = lineIndex;
 
-    // Activate dimming overlay with clip-path to exclude selected line
     const dimmingOverlay = document.getElementById("dimming-overlay");
     if (dimmingOverlay) {
       dimmingOverlay.classList.add("active");
 
-      // Use requestAnimationFrame to ensure layout is updated before calculating clip-path
       requestAnimationFrame(() => {
-        // Calculate line bounds for clipping
         const imageContainer = document.getElementById("image-container");
         const containerRect = imageContainer.getBoundingClientRect();
         const lineBoxRect = lineBox.getBoundingClientRect();
 
-        // Convert to percentages relative to image container
         const left =
           ((lineBoxRect.left - containerRect.left) / containerRect.width) * 100;
         const top =
@@ -1044,14 +1021,12 @@ function selectLine(lineId, lineIndex) {
           ((lineBoxRect.bottom - containerRect.top) / containerRect.height) *
           100;
 
-        // Add some padding around the line
-        const padding = 2; // percentage
+        const padding = 2;
         const clipLeft = Math.max(0, left - padding);
         const clipTop = Math.max(0, top - padding);
         const clipRight = Math.min(100, right + padding);
         const clipBottom = Math.min(100, bottom + padding);
 
-        // Create clip-path that covers everything except the selected line area
         const clipPath = `polygon(
                     0% 0%, 
                     0% 100%, 
@@ -1069,9 +1044,8 @@ function selectLine(lineId, lineIndex) {
       });
     }
 
-    // Mark adjacent lines (2 above and 2 below) as clickable with reduced overlay
     for (let offset = -2; offset <= 2; offset++) {
-      if (offset === 0) continue; // Skip the selected line itself
+      if (offset === 0) continue;
 
       const adjacentIndex = lineIndex + offset;
       if (adjacentIndex >= 0 && adjacentIndex < allLines.length) {
@@ -1085,14 +1059,12 @@ function selectLine(lineId, lineIndex) {
       }
     }
 
-    // Find the first word in the line and select it for editing
     const line = allLines.find((l) => l.id === lineId);
     if (line && line.words && line.words.length > 0) {
       const firstWord = line.words[0];
       selectedWordId = firstWord.id;
       currentWordIndex = hocrData.words.findIndex((w) => w.id === firstWord.id);
 
-      // Show line editor with the first word selected
       showLineEditor(firstWord);
     }
 
@@ -1106,14 +1078,12 @@ function selectWord(wordId) {
 
   const word = hocrData.words.find((w) => w.id === wordId);
   if (word) {
-    // Select the line that contains this word
     const lineId = word.line_id || word.LineID;
     if (lineId) {
       const lineIndex = allLines.findIndex((l) => l.id === lineId);
       if (lineIndex !== -1) {
         selectLine(lineId, lineIndex);
       } else {
-        // Fallback: show line editor for the word
         showLineEditor(word);
       }
     } else {
@@ -1289,43 +1259,6 @@ function updateLineText() {
   updateMetrics();
 }
 
-function updateWordText(wordId, newText) {
-  if (!hocrData || !hocrData.words) return;
-
-  const word = hocrData.words.find((w) => w.id === wordId);
-  if (word) {
-    word.text = newText;
-
-    // Update the main word editor if this is the selected word
-    if (wordId === selectedWordId) {
-      document.getElementById("word-text").value = newText;
-    }
-
-    // Update line editor display
-    const selectedWord = hocrData.words.find((w) => w.id === selectedWordId);
-    if (selectedWord) {
-      displayLineEditor(selectedWord);
-    }
-
-    // Update hOCR and metrics
-    updateHOCRSource();
-    updateMetrics();
-  }
-}
-
-function escapeHTML(text) {
-  const div = document.createElement("div");
-  div.textContent = text;
-  return div.innerHTML;
-}
-
-function getConfidenceHTML(conf) {
-  let className = "conf-high";
-  if (conf < 60) className = "conf-low";
-  else if (conf < 80) className = "conf-medium";
-
-  return `<span class="confidence-indicator ${className}">${conf}%</span>`;
-}
 
 function updateSelectedWord() {
   if (!selectedWordId || !hocrData) return;
@@ -1354,11 +1287,7 @@ function deleteSelectedLine() {
     );
 
     // Clear selection
-    selectedWordId = null;
-    currentWordIndex = -1;
-    currentLineWords = [];
-    currentLineId = null;
-    currentLineIndex = -1;
+    resetNavigationState();
 
     // Hide line editor
     document.getElementById("line-editor").style.display = "none";
@@ -1481,18 +1410,6 @@ function escapeXML(text) {
     .replace(/'/g, "&#39;");
 }
 
-function toggleLowConfidence() {
-  showLowConfidence = !showLowConfidence;
-  document.querySelectorAll(".hocr-word-box").forEach((box) => {
-    if (showLowConfidence) {
-      box.style.display = box.classList.contains("low-confidence")
-        ? "block"
-        : "none";
-    } else {
-      box.style.display = "block";
-    }
-  });
-}
 
 function updateProgress() {
   const total = currentSession.images.length;
@@ -1571,12 +1488,8 @@ async function saveAndNext() {
   await saveSession();
 
   currentImageIndex++;
-  selectedWordId = null;
-  currentWordIndex = -1;
-  currentLineWords = [];
-  currentLineId = null;
+  resetNavigationState();
   allLines = [];
-  currentLineIndex = -1;
   document.getElementById("line-editor").style.display = "none";
   document.getElementById("no-selection").style.display = "block";
 
@@ -1586,12 +1499,8 @@ async function saveAndNext() {
 function previousImage() {
   if (currentImageIndex > 0) {
     currentImageIndex--;
-    selectedWordId = null;
-    currentWordIndex = -1;
-    currentLineWords = [];
-    currentLineId = null;
+    resetNavigationState();
     allLines = [];
-    currentLineIndex = -1;
     document.getElementById("line-editor").style.display = "none";
     document.getElementById("no-selection").style.display = "block";
     loadCurrentImage();

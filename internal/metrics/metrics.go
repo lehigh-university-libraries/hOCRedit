@@ -3,27 +3,11 @@ package metrics
 import (
 	"regexp"
 	"strings"
+
+	"github.com/lehigh-university-libraries/hOCRedit/internal/models"
 )
 
-type EvalResult struct {
-	Identifier            string  `json:"identifier"`
-	ImagePath             string  `json:"image_path"`
-	TranscriptPath        string  `json:"transcript_path"`
-	Public                bool    `json:"public"`
-	OpenAIResponse        string  `json:"openai_response"`
-	CharacterSimilarity   float64 `json:"character_similarity"`
-	WordSimilarity        float64 `json:"word_similarity"`
-	WordAccuracy          float64 `json:"word_accuracy"`
-	WordErrorRate         float64 `json:"word_error_rate"`
-	TotalWordsOriginal    int     `json:"total_words_original"`
-	TotalWordsTranscribed int     `json:"total_words_transcribed"`
-	CorrectWords          int     `json:"correct_words"`
-	Substitutions         int     `json:"substitutions"`
-	Deletions             int     `json:"deletions"`
-	Insertions            int     `json:"insertions"`
-}
-
-func CalculateAccuracyMetrics(original, transcribed string) EvalResult {
+func CalculateAccuracyMetrics(original, transcribed string) models.EvalResult {
 	origNorm := normalizeText(original)
 	transNorm := normalizeText(transcribed)
 	charSim := calculateSimilarity(origNorm, transNorm)
@@ -34,7 +18,7 @@ func CalculateAccuracyMetrics(original, transcribed string) EvalResult {
 
 	wer := 1.0 - wordAcc
 
-	return EvalResult{
+	return models.EvalResult{
 		CharacterSimilarity:   charSim,
 		WordSimilarity:        wordSim,
 		WordAccuracy:          wordAcc,

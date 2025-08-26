@@ -1,4 +1,4 @@
-package parser
+package hocr
 
 import (
 	"encoding/xml"

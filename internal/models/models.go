@@ -29,27 +29,6 @@ type EvalResult struct {
 	Insertions            int     `json:"insertions"`
 }
 
-type EvalSummary struct {
-	Config  EvalConfig   `json:"config"`
-	Results []EvalResult `json:"results"`
-}
-
-type TemplateData struct {
-	Model       string
-	Prompt      string
-	Temperature float64
-	ImageBase64 string
-	MimeType    string
-}
-
-type OpenAIResponse struct {
-	Choices []struct {
-		Message struct {
-			Content string `json:"content"`
-		} `json:"message"`
-	} `json:"choices"`
-}
-
 type CorrectionSession struct {
 	ID        string       `json:"id"`
 	Images    []ImageItem  `json:"images"`
@@ -100,14 +79,7 @@ type OCRResponse struct {
 }
 
 type Response struct {
-	TextAnnotations    []TextAnnotation    `json:"textAnnotations"`
 	FullTextAnnotation *FullTextAnnotation `json:"fullTextAnnotation"`
-}
-
-type TextAnnotation struct {
-	Locale       string       `json:"locale"`
-	Description  string       `json:"description"`
-	BoundingPoly BoundingPoly `json:"boundingPoly"`
 }
 
 type FullTextAnnotation struct {
@@ -147,16 +119,11 @@ type Symbol struct {
 
 type Property struct {
 	DetectedLanguages []DetectedLanguage `json:"detectedLanguages"`
-	DetectedBreak     *DetectedBreak     `json:"detectedBreak"`
 }
 
 type DetectedLanguage struct {
 	LanguageCode string  `json:"languageCode"`
 	Confidence   float64 `json:"confidence"`
-}
-
-type DetectedBreak struct {
-	Type string `json:"type"`
 }
 
 type BoundingPoly struct {
