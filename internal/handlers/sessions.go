@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/lehigh-university-libraries/hOCRedit/internal/metrics"
 	"github.com/lehigh-university-libraries/hOCRedit/internal/models"
-	"github.com/lehigh-university-libraries/hOCRedit/pkg/metrics"
 )
 
 func (h *Handler) HandleSessions(w http.ResponseWriter, r *http.Request) {
