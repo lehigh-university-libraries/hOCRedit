@@ -36,7 +36,7 @@ func (s *Service) ProcessImageToHOCR(imagePath string) (string, error) {
 		slog.Warn("Failed to create stitched image, using basic hOCR output only", "error", err)
 		return s.convertToBasicHOCR(ocrResponse), nil
 	}
-	// defer os.Remove(stitchedImagePath)
+	defer os.Remove(stitchedImagePath)
 
 	slog.Info("Created stitched image with hOCR markup", "path", stitchedImagePath)
 
