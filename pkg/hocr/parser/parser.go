@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/lehigh-university-libraries/hocr-edit/internal/models"
+	"github.com/lehigh-university-libraries/hOCRedit/internal/models"
 )
 
 type XMLElement struct {
@@ -74,7 +74,7 @@ func traverseElementsWithLineContext(element XMLElement, words *[]models.HOCRWor
 	// Parse word elements with line context
 	if isWordElement(element) {
 		word, err := parseWordElement(element)
-		if err == nil && word.ID != "" {
+		if err == nil && word.ID != "" && isValidWordText(word.Text) {
 			word.LineID = currentLineID
 			*words = append(*words, word)
 		}
@@ -118,24 +118,31 @@ func parseLineElement(element XMLElement) (models.HOCRLine, error) {
 		}
 	}
 
+	// Find ALL words in this line
 	var words []models.HOCRWord
-	traverseWordsInLine(element, &words, line.ID)
+	findAllWordsInLine(element, &words, line.ID)
 	line.Words = words
 
 	return line, nil
 }
 
-func traverseWordsInLine(element XMLElement, words *[]models.HOCRWord, lineID string) {
+func findAllWordsInLine(element XMLElement, words *[]models.HOCRWord, lineID string) {
 	if isWordElement(element) {
 		word, err := parseWordElement(element)
-		if err == nil && word.ID != "" {
-			word.LineID = lineID
+		if err == nil && word.ID != "" && isValidWordText(word.Text) {
+			// Ensure line_id is properly set
+			if lineID != "" {
+				word.LineID = lineID
+			} else {
+				// Fallback: generate line ID if missing
+				word.LineID = "line_" + word.ID
+			}
 			*words = append(*words, word)
 		}
 	}
 
 	for _, child := range element.Children {
-		traverseWordsInLine(child, words, lineID)
+		findAllWordsInLine(child, words, lineID)
 	}
 }
 
@@ -206,4 +213,9 @@ func parseTitleAttribute(title string, word *models.HOCRWord) error {
 	}
 
 	return nil
+}
+
+func isValidWordText(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	return trimmed != ""
 }

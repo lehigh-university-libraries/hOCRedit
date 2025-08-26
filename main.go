@@ -6,8 +6,8 @@ import (
 	"os"
 
 	"github.com/joho/godotenv"
-	"github.com/lehigh-university-libraries/hocr-edit/internal/handlers"
-	"github.com/lehigh-university-libraries/hocr-edit/internal/utils"
+	"github.com/lehigh-university-libraries/hOCRedit/internal/handlers"
+	"github.com/lehigh-university-libraries/hOCRedit/internal/utils"
 )
 
 func main() {

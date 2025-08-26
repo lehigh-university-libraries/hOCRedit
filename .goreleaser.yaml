@@ -3,7 +3,7 @@ before:
   hooks:
     - go mod tidy
 builds:
-  - binary: htr
+  - binary: hOCRedit
     env:
       - CGO_ENABLED=0
     goos:

@@ -3,9 +3,10 @@ package hocr
 import (
 	"fmt"
 	"html"
+	"sort"
 	"strings"
 
-	"github.com/lehigh-university-libraries/hocr-edit/internal/models"
+	"github.com/lehigh-university-libraries/hOCRedit/internal/models"
 )
 
 type Converter struct {
@@ -20,12 +21,12 @@ func NewConverter() *Converter {
 	}
 }
 
-func (h *Converter) ConvertToHOCRLines(gcvResponse models.GCVResponse) ([]models.HOCRLine, error) {
-	if len(gcvResponse.Responses) == 0 {
-		return nil, fmt.Errorf("no responses found in GCV data")
+func (h *Converter) ConvertToHOCRLines(ocrResponse models.OCRResponse) ([]models.HOCRLine, error) {
+	if len(ocrResponse.Responses) == 0 {
+		return nil, fmt.Errorf("no responses found in OCR data")
 	}
 
-	response := gcvResponse.Responses[0]
+	response := ocrResponse.Responses[0]
 	if response.FullTextAnnotation == nil {
 		return nil, fmt.Errorf("no full text annotation found")
 	}
@@ -50,7 +51,7 @@ func (h *Converter) ConvertHOCRLinesToXML(lines []models.HOCRLine, pageWidth, pa
 	hocr.WriteString("<head>\n")
 	hocr.WriteString("<title></title>\n")
 	hocr.WriteString("<meta http-equiv=\"Content-Type\" content=\"text/html; charset=utf-8\" />\n")
-	hocr.WriteString("<meta name='ocr-system' content='google-cloud-vision' />\n")
+	hocr.WriteString("<meta name='ocr-system' content='custom-word-detection-with-chatgpt' />\n")
 	hocr.WriteString("<meta name='ocr-capabilities' content='ocr_page ocr_carea ocr_par ocr_line ocrx_word' />\n")
 	hocr.WriteString("</head>\n")
 	hocr.WriteString("<body>\n")
@@ -93,17 +94,17 @@ func (h *Converter) convertHOCRWordToXML(word models.HOCRWord) string {
 		word.ID, title, html.EscapeString(word.Text))
 }
 
-func (h *Converter) ConvertToHOCR(gcvResponse models.GCVResponse) (string, error) {
-	lines, err := h.ConvertToHOCRLines(gcvResponse)
+func (h *Converter) ConvertToHOCR(ocrResponse models.OCRResponse) (string, error) {
+	lines, err := h.ConvertToHOCRLines(ocrResponse)
 	if err != nil {
 		return "", err
 	}
 
-	if len(gcvResponse.Responses) == 0 || gcvResponse.Responses[0].FullTextAnnotation == nil || len(gcvResponse.Responses[0].FullTextAnnotation.Pages) == 0 {
+	if len(ocrResponse.Responses) == 0 || ocrResponse.Responses[0].FullTextAnnotation == nil || len(ocrResponse.Responses[0].FullTextAnnotation.Pages) == 0 {
 		return "", fmt.Errorf("no page data found")
 	}
 
-	page := gcvResponse.Responses[0].FullTextAnnotation.Pages[0]
+	page := ocrResponse.Responses[0].FullTextAnnotation.Pages[0]
 	return h.ConvertHOCRLinesToXML(lines, page.Width, page.Height), nil
 }
 
@@ -132,20 +133,62 @@ func (h *Converter) convertBlockToLines(block models.Block) []models.HOCRLine {
 }
 
 func (h *Converter) convertParagraphToLines(paragraph models.Paragraph) []models.HOCRLine {
-	wordsGroups := h.groupWordsIntoLines(paragraph.Words)
-	var lines []models.HOCRLine
+	if len(paragraph.Words) == 0 {
+		return []models.HOCRLine{}
+	}
 
-	for _, wordsGroup := range wordsGroups {
-		if len(wordsGroup) == 0 {
-			continue
+	// Group words into lines based on Y-coordinate proximity
+	var lineGroups [][]models.Word
+
+	// Sort words by reading order (top to bottom, left to right)
+	sortedWords := make([]models.Word, len(paragraph.Words))
+	copy(sortedWords, paragraph.Words)
+	sort.Slice(sortedWords, func(i, j int) bool {
+		// First sort by Y coordinate (top to bottom)
+		yDiff := h.getWordCenterY(sortedWords[i]) - h.getWordCenterY(sortedWords[j])
+		if abs(yDiff) > 20 { // Same line threshold: 20 pixels
+			return yDiff < 0
 		}
+		// If roughly same Y, sort by X coordinate (left to right)
+		return h.getWordCenterX(sortedWords[i]) < h.getWordCenterX(sortedWords[j])
+	})
 
+	// Group words into lines
+	currentLine := []models.Word{sortedWords[0]}
+	currentLineY := h.getWordCenterY(sortedWords[0])
+
+	for i := 1; i < len(sortedWords); i++ {
+		word := sortedWords[i]
+		wordY := h.getWordCenterY(word)
+
+		// Check if this word belongs to the current line (within 20 pixels vertically)
+		if abs(wordY-currentLineY) <= 20 {
+			currentLine = append(currentLine, word)
+		} else {
+			// Start a new line
+			lineGroups = append(lineGroups, currentLine)
+			currentLine = []models.Word{word}
+			currentLineY = wordY
+		}
+	}
+	// Don't forget the last line
+	if len(currentLine) > 0 {
+		lineGroups = append(lineGroups, currentLine)
+	}
+
+	// Convert line groups to HOCRLine objects
+	var lines []models.HOCRLine
+	for _, lineWords := range lineGroups {
 		lineID := fmt.Sprintf("line_%d", h.lineCounter)
-		lineBBox := h.calculateLineBBoxStruct(wordsGroup)
+		h.lineCounter++
 
+		// Calculate line bounding box from all words in the line
+		lineBBox := h.calculateLineBoundingBox(lineWords)
+
+		// Convert all words in this line
 		var hocrWords []models.HOCRWord
-		for _, gcvWord := range wordsGroup {
-			hocrWord := h.convertGCVWordToHOCRWord(gcvWord, lineID)
+		for _, ocrWord := range lineWords {
+			hocrWord := h.convertOCRWordToHOCRWord(ocrWord, lineID)
 			hocrWords = append(hocrWords, hocrWord)
 		}
 
@@ -156,87 +199,74 @@ func (h *Converter) convertParagraphToLines(paragraph models.Paragraph) []models
 		}
 
 		lines = append(lines, line)
-		h.lineCounter++
 	}
 
 	return lines
 }
 
-func (h *Converter) groupWordsIntoLines(words []models.Word) [][]models.Word {
-	if len(words) == 0 {
-		return nil
+// Helper function to get word center Y coordinate
+func (h *Converter) getWordCenterY(word models.Word) int {
+	if len(word.BoundingBox.Vertices) < 4 {
+		return 0
 	}
-
-	var lines [][]models.Word
-	var currentLine []models.Word
-
-	for i, word := range words {
-		currentLine = append(currentLine, word)
-
-		shouldEndLine := false
-
-		if len(word.Symbols) > 0 {
-			lastSymbol := word.Symbols[len(word.Symbols)-1]
-			if lastSymbol.Property != nil && lastSymbol.Property.DetectedBreak != nil {
-				breakType := lastSymbol.Property.DetectedBreak.Type
-				if breakType == "LINE_BREAK" || breakType == "EOL_SURE_SPACE" {
-					shouldEndLine = true
-				}
-			}
-		}
-
-		if i == len(words)-1 {
-			shouldEndLine = true
-		}
-
-		if shouldEndLine {
-			lines = append(lines, currentLine)
-			currentLine = nil
-		}
-	}
-
-	return lines
+	return (word.BoundingBox.Vertices[0].Y + word.BoundingBox.Vertices[2].Y) / 2
 }
 
-func (h *Converter) calculateLineBBoxStruct(words []models.Word) models.BBox {
+// Helper function to get word center X coordinate
+func (h *Converter) getWordCenterX(word models.Word) int {
+	if len(word.BoundingBox.Vertices) < 4 {
+		return 0
+	}
+	return (word.BoundingBox.Vertices[0].X + word.BoundingBox.Vertices[2].X) / 2
+}
+
+// Helper function to calculate line bounding box from multiple words
+func (h *Converter) calculateLineBoundingBox(words []models.Word) models.BBox {
 	if len(words) == 0 {
 		return models.BBox{X1: 0, Y1: 0, X2: 0, Y2: 0}
 	}
 
-	minX, minY := int(^uint(0)>>1), int(^uint(0)>>1)
+	minX, minY := int(^uint(0)>>1), int(^uint(0)>>1) // Max int values
 	maxX, maxY := 0, 0
 
 	for _, word := range words {
-		for _, vertex := range word.BoundingBox.Vertices {
-			if vertex.X < minX {
-				minX = vertex.X
-			}
-			if vertex.X > maxX {
-				maxX = vertex.X
-			}
-			if vertex.Y < minY {
-				minY = vertex.Y
-			}
-			if vertex.Y > maxY {
-				maxY = vertex.Y
-			}
+		wordBBox := h.boundingPolyToBBoxStruct(word.BoundingBox)
+		if wordBBox.X1 < minX {
+			minX = wordBBox.X1
+		}
+		if wordBBox.Y1 < minY {
+			minY = wordBBox.Y1
+		}
+		if wordBBox.X2 > maxX {
+			maxX = wordBBox.X2
+		}
+		if wordBBox.Y2 > maxY {
+			maxY = wordBBox.Y2
 		}
 	}
 
 	return models.BBox{X1: minX, Y1: minY, X2: maxX, Y2: maxY}
 }
 
-func (h *Converter) convertGCVWordToHOCRWord(gcvWord models.Word, lineID string) models.HOCRWord {
+// Add abs helper function if not already present
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
+func (h *Converter) convertOCRWordToHOCRWord(ocrWord models.Word, lineID string) models.HOCRWord {
 	var text strings.Builder
-	for _, symbol := range gcvWord.Symbols {
+	for _, symbol := range ocrWord.Symbols {
 		text.WriteString(symbol.Text)
 	}
 
-	bbox := h.boundingPolyToBBoxStruct(gcvWord.BoundingBox)
+	bbox := h.boundingPolyToBBoxStruct(ocrWord.BoundingBox)
 
 	confidence := 95.0
-	if gcvWord.Property != nil && len(gcvWord.Property.DetectedLanguages) > 0 {
-		confidence = gcvWord.Property.DetectedLanguages[0].Confidence * 100
+	if ocrWord.Property != nil && len(ocrWord.Property.DetectedLanguages) > 0 {
+		confidence = ocrWord.Property.DetectedLanguages[0].Confidence * 100
 	}
 
 	wordID := fmt.Sprintf("word_%d", h.wordCounter)

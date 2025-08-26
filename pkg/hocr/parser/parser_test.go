@@ -3,7 +3,7 @@ package parser_test
 import (
 	"testing"
 
-	"github.com/lehigh-university-libraries/hocr-edit/pkg/hocr/parser"
+	"github.com/lehigh-university-libraries/hOCRedit/pkg/hocr/parser"
 )
 
 func TestParseHOCRWords(t *testing.T) {

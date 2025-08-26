@@ -3,7 +3,7 @@ package storage
 import (
 	"sync"
 
-	"github.com/lehigh-university-libraries/hocr-edit/internal/models"
+	"github.com/lehigh-university-libraries/hOCRedit/internal/models"
 )
 
 type SessionStore struct {

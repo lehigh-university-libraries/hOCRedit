@@ -135,7 +135,7 @@ body {
     display: flex;
     flex-direction: column;
 }
-.hocr-editor { 
+.hOCReditor { 
     flex: 1;
     background: #111; 
     border: 1px solid #333; 
@@ -147,7 +147,7 @@ body {
     color: #e5e5e5;
     line-height: 1.5;
 }
-.hocr-editor:focus {
+.hOCReditor:focus {
     outline: none;
     border-color: #3b82f6;
     box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
