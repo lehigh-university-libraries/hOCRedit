@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/lehigh-university-libraries/hOCRedit/internal/models"
+	"github.com/lehigh-university-libraries/hOCRedit/internal/utils"
 )
 
 type ChatGPTRequest struct {
@@ -74,9 +75,11 @@ func (s *Service) createStitchedImageWithHOCRMarkup(imagePath string, response m
 						bbox.Vertices[0].X, bbox.Vertices[0].Y,
 						bbox.Vertices[2].X, bbox.Vertices[2].Y)
 					lineTagPath, err := s.createTextImage(lineTag, tempDir, fmt.Sprintf("line_%d", wordIndex))
-					if err == nil {
-						componentPaths = append(componentPaths, lineTagPath)
+					if err != nil {
+						utils.ExitOnError("Unable to add line hOCR text to stitched image", err)
 					}
+
+					componentPaths = append(componentPaths, lineTagPath)
 
 					// Create hOCR word opening tag
 					wordTag := fmt.Sprintf(`<span class='ocrx_word' id='word_%d' title='bbox %d %d %d %d'>`,
@@ -84,26 +87,30 @@ func (s *Service) createStitchedImageWithHOCRMarkup(imagePath string, response m
 						bbox.Vertices[0].X, bbox.Vertices[0].Y,
 						bbox.Vertices[2].X, bbox.Vertices[2].Y)
 					wordTagPath, err := s.createTextImage(wordTag, tempDir, fmt.Sprintf("word_%d", wordIndex))
-					if err == nil {
-						componentPaths = append(componentPaths, wordTagPath)
+					if err != nil {
+						utils.ExitOnError("Unable to add word hOCR text to stitched image", err)
 					}
+					componentPaths = append(componentPaths, wordTagPath)
 
 					// Extract the actual word image
 					wordImagePath, err := s.extractWordImage(imagePath, bbox, tempDir, wordIndex)
-					if err == nil {
-						componentPaths = append(componentPaths, wordImagePath)
+					if err != nil {
+						utils.ExitOnError("Unable to add image cutout to stitched image", err)
 					}
+					componentPaths = append(componentPaths, wordImagePath)
 
 					// Create closing tags
 					wordClosePath, err := s.createTextImage("</span>", tempDir, fmt.Sprintf("word_close_%d", wordIndex))
-					if err == nil {
-						componentPaths = append(componentPaths, wordClosePath)
+					if err != nil {
+						utils.ExitOnError("Unable to add closing word span to stitched image", err)
 					}
+					componentPaths = append(componentPaths, wordClosePath)
 
 					lineClosePath, err := s.createTextImage("</span>", tempDir, fmt.Sprintf("line_close_%d", wordIndex))
-					if err == nil {
-						componentPaths = append(componentPaths, lineClosePath)
+					if err != nil {
+						utils.ExitOnError("Unable to add closing line span to stitched image", err)
 					}
+					componentPaths = append(componentPaths, lineClosePath)
 
 					wordIndex++
 				}
