@@ -318,22 +318,38 @@ func (h *Handler) HandleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *Handler) createSessionFromURL(imageURL string) (string, error) {
+type ImageProcessResult struct {
+	ImageFilename string
+	ImageFilePath string
+	HOCRXML       string
+	Width         int
+	Height        int
+	MD5Hash       string
+}
+
+type SessionConfig struct {
+	Model       string
+	Prompt      string
+	Temperature float64
+	Prefix      string
+}
+
+func (h *Handler) processImageFromURL(imageURL string) (*ImageProcessResult, error) {
 	// Download image from URL
 	resp, err := http.Get(imageURL)
 	if err != nil {
-		return "", fmt.Errorf("failed to download image: %w", err)
+		return nil, fmt.Errorf("failed to download image: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("failed to download image: HTTP %d", resp.StatusCode)
+		return nil, fmt.Errorf("failed to download image: HTTP %d", resp.StatusCode)
 	}
 
 	// Read image data
 	imageData, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("failed to read image data: %w", err)
+		return nil, fmt.Errorf("failed to read image data: %w", err)
 	}
 
 	// Get content type from response
@@ -345,7 +361,7 @@ func (h *Handler) createSessionFromURL(imageURL string) (string, error) {
 		slog.Info("Image requires Houdini conversion", "content_type", contentType, "url", imageURL)
 		convertedData, err := h.convertImageViaHoudini(imageData, contentType)
 		if err != nil {
-			return "", fmt.Errorf("failed to convert image via Houdini: %w", err)
+			return nil, fmt.Errorf("failed to convert image via Houdini: %w", err)
 		}
 		imageData = convertedData
 		contentType = "image/jpeg"
@@ -354,19 +370,7 @@ func (h *Handler) createSessionFromURL(imageURL string) (string, error) {
 	// Calculate MD5 hash of the original image data for consistent caching
 	md5Hash := utils.CalculateDataMD5(originalImageData)
 
-	// Extract filename from URL or use md5 hash
-	filename := md5Hash
-	if urlParts := strings.Split(imageURL, "/"); len(urlParts) > 0 {
-		lastPart := urlParts[len(urlParts)-1]
-		if lastPart != "" && strings.Contains(lastPart, ".") {
-			filename = strings.TrimSuffix(lastPart, filepath.Ext(lastPart))
-		}
-	}
-
-	// Create session ID using filename and timestamp
-	sessionID := fmt.Sprintf("%s_%d", filename, time.Now().Unix())
-
-	// Determine file extension from content type (which may have been updated by Houdini conversion)
+	// Determine file extension from content type
 	ext := ".jpg" // default
 	switch contentType {
 	case "image/png":
@@ -384,17 +388,15 @@ func (h *Handler) createSessionFromURL(imageURL string) (string, error) {
 
 	uploadsDir := "uploads"
 	if err := os.MkdirAll(uploadsDir, 0755); err != nil {
-		return "", fmt.Errorf("failed to create uploads directory: %w", err)
+		return nil, fmt.Errorf("failed to create uploads directory: %w", err)
 	}
 
 	imageFilename := md5Hash + ext
-	hocrFilename := md5Hash + ".xml"
 	imageFilePath := filepath.Join(uploadsDir, imageFilename)
-	hocrFilePath := filepath.Join(uploadsDir, hocrFilename)
 
 	// Save image file
 	if err := os.WriteFile(imageFilePath, imageData, 0644); err != nil {
-		return "", fmt.Errorf("failed to save image: %w", err)
+		return nil, fmt.Errorf("failed to save image: %w", err)
 	}
 
 	slog.Info("Image downloaded and saved", "filename", imageFilename, "md5", md5Hash, "url", imageURL)
@@ -402,59 +404,109 @@ func (h *Handler) createSessionFromURL(imageURL string) (string, error) {
 	// Get image dimensions
 	width, height := utils.GetImageDimensions(imageFilePath)
 
-	// Process hOCR (check cache first)
-	var hocrXML string
+	// Process hOCR
+	hocrXML, err := h.processHOCR(imageFilePath, md5Hash)
+	if err != nil {
+		return nil, fmt.Errorf("failed to process hOCR: %w", err)
+	}
+
+	return &ImageProcessResult{
+		ImageFilename: imageFilename,
+		ImageFilePath: imageFilePath,
+		HOCRXML:       hocrXML,
+		Width:         width,
+		Height:        height,
+		MD5Hash:       md5Hash,
+	}, nil
+}
+
+func (h *Handler) processHOCR(imageFilePath, md5Hash string) (string, error) {
+	hocrFilename := md5Hash + ".xml"
+	hocrFilePath := filepath.Join("uploads", hocrFilename)
+
+	// Check cache first
 	if _, err := os.Stat(hocrFilePath); err == nil {
 		hocrData, err := os.ReadFile(hocrFilePath)
 		if err != nil {
 			slog.Warn("Failed to read existing hOCR file", "error", err, "path", hocrFilePath)
-			hocrXML, err = h.getOCRForImage(imageFilePath)
-			if err != nil {
-				return "", fmt.Errorf("failed to process image with OCR: %w", err)
-			}
-			if err := os.WriteFile(hocrFilePath, []byte(hocrXML), 0644); err != nil {
-				slog.Warn("Failed to save hOCR file", "error", err)
-			}
 		} else {
-			hocrXML = string(hocrData)
 			slog.Info("Using cached hOCR", "filename", hocrFilename)
-		}
-	} else {
-		hocrXML, err = h.getOCRForImage(imageFilePath)
-		if err != nil {
-			return "", fmt.Errorf("failed to process image with OCR: %w", err)
-		}
-
-		if err := os.WriteFile(hocrFilePath, []byte(hocrXML), 0644); err != nil {
-			slog.Warn("Failed to save hOCR file", "error", err)
-		} else {
-			slog.Info("hOCR cached", "filename", hocrFilename)
+			return string(hocrData), nil
 		}
 	}
 
-	// Create session
+	// Generate new hOCR
+	hocrXML, err := h.getOCRForImage(imageFilePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to process image with OCR: %w", err)
+	}
+
+	// Cache the result
+	if err := os.WriteFile(hocrFilePath, []byte(hocrXML), 0644); err != nil {
+		slog.Warn("Failed to save hOCR file", "error", err)
+	} else {
+		slog.Info("hOCR cached", "filename", hocrFilename)
+	}
+
+	return hocrXML, nil
+}
+
+func (h *Handler) createImageSession(sessionID string, result *ImageProcessResult, config SessionConfig) *models.CorrectionSession {
 	session := &models.CorrectionSession{
 		ID:        sessionID,
 		Images:    []models.ImageItem{},
 		Current:   0,
 		CreatedAt: time.Now(),
 		Config: models.EvalConfig{
-			Timestamp: time.Now().Format("2006-01-02_15-04-05"),
+			Model:       config.Model,
+			Prompt:      config.Prompt,
+			Temperature: config.Temperature,
+			Timestamp:   time.Now().Format("2006-01-02_15-04-05"),
 		},
 	}
 
 	imageItem := models.ImageItem{
 		ID:            "img_1",
-		ImagePath:     imageFilename,
-		ImageURL:      "/static/uploads/" + imageFilename,
-		OriginalHOCR:  hocrXML,
+		ImagePath:     result.ImageFilename,
+		ImageURL:      "/static/uploads/" + result.ImageFilename,
+		OriginalHOCR:  result.HOCRXML,
 		CorrectedHOCR: "",
 		Completed:     false,
-		ImageWidth:    width,
-		ImageHeight:   height,
+		ImageWidth:    result.Width,
+		ImageHeight:   result.Height,
 	}
 
 	session.Images = []models.ImageItem{imageItem}
+	return session
+}
+
+func (h *Handler) extractFilenameFromURL(imageURL, md5Hash string) string {
+	if urlParts := strings.Split(imageURL, "/"); len(urlParts) > 0 {
+		lastPart := urlParts[len(urlParts)-1]
+		if lastPart != "" && strings.Contains(lastPart, ".") {
+			return strings.TrimSuffix(lastPart, filepath.Ext(lastPart))
+		}
+	}
+	return md5Hash
+}
+
+func (h *Handler) createSessionFromURL(imageURL string) (string, error) {
+	result, err := h.processImageFromURL(imageURL)
+	if err != nil {
+		return "", err
+	}
+
+	// Extract filename from URL or use md5 hash
+	filename := h.extractFilenameFromURL(imageURL, result.MD5Hash)
+	sessionID := fmt.Sprintf("%s_%d", filename, time.Now().Unix())
+
+	config := SessionConfig{
+		Model:       "",
+		Prompt:      "",
+		Temperature: 0.0,
+	}
+
+	session := h.createImageSession(sessionID, result, config)
 	h.sessionStore.Set(sessionID, session)
 
 	slog.Info("Session created from URL", "session_id", sessionID, "url", imageURL)
@@ -726,89 +778,11 @@ func (h *Handler) createSessionFromDrupalNode(nid string) (string, error) {
 	return sessionID, nil
 }
 
-// createSessionFromDrupalWithExistingHOCR creates a session using existing hOCR from Drupal
 func (h *Handler) createSessionFromDrupalWithExistingHOCR(imageURL, hocrURL, nid string) (string, error) {
-	// Download image from URL (similar to createSessionFromURL but use existing hOCR)
-	resp, err := http.Get(imageURL)
+	result, err := h.processImageFromURL(imageURL)
 	if err != nil {
-		return "", fmt.Errorf("failed to download image: %w", err)
+		return "", err
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("failed to download image: HTTP %d", resp.StatusCode)
-	}
-
-	// Read image data
-	imageData, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read image data: %w", err)
-	}
-
-	// Get content type from response
-	contentType := resp.Header.Get("Content-Type")
-
-	// Convert JP2/TIFF images using Houdini if needed
-	originalImageData := imageData
-	if needsHoudiniConversion(contentType, imageURL) {
-		slog.Info("Image requires Houdini conversion", "content_type", contentType, "url", imageURL)
-
-		convertedData, err := h.convertImageViaHoudini(imageData, contentType)
-		if err != nil {
-			return "", fmt.Errorf("failed to convert image via Houdini: %w", err)
-		}
-		imageData = convertedData
-		contentType = "image/jpeg" // Houdini converts to JPEG
-	}
-
-	// Calculate MD5 hash of the original image data for consistent caching
-	md5Hash := utils.CalculateDataMD5(originalImageData)
-
-	// Extract filename from URL or use md5 hash
-	filename := md5Hash
-	if urlParts := strings.Split(imageURL, "/"); len(urlParts) > 0 {
-		lastPart := urlParts[len(urlParts)-1]
-		if lastPart != "" && strings.Contains(lastPart, ".") {
-			filename = strings.TrimSuffix(lastPart, filepath.Ext(lastPart))
-		}
-	}
-
-	// Use NID in session name for Drupal sessions
-	sessionID := fmt.Sprintf("drupal_%s_%s_%d", nid, filename, time.Now().Unix())
-
-	// Determine file extension from content type (which may have been updated by Houdini conversion)
-	ext := ".jpg" // default
-	switch contentType {
-	case "image/png":
-		ext = ".png"
-	case "image/gif":
-		ext = ".gif"
-	case "image/webp":
-		ext = ".webp"
-	default:
-		// Try to get extension from URL
-		if urlExt := filepath.Ext(imageURL); urlExt != "" {
-			ext = urlExt
-		}
-	}
-
-	uploadsDir := "uploads"
-	if err := os.MkdirAll(uploadsDir, 0755); err != nil {
-		return "", fmt.Errorf("failed to create uploads directory: %w", err)
-	}
-
-	imageFilename := md5Hash + ext
-	imageFilePath := filepath.Join(uploadsDir, imageFilename)
-
-	// Save image file
-	if err := os.WriteFile(imageFilePath, imageData, 0644); err != nil {
-		return "", fmt.Errorf("failed to save image: %w", err)
-	}
-
-	slog.Info("Image downloaded and saved", "filename", imageFilename, "md5", md5Hash, "url", imageURL)
-
-	// Get image dimensions
-	width, height := utils.GetImageDimensions(imageFilePath)
 
 	// Download existing hOCR
 	hocrResp, err := http.Get(hocrURL)
@@ -826,35 +800,21 @@ func (h *Handler) createSessionFromDrupalWithExistingHOCR(imageURL, hocrURL, nid
 		return "", fmt.Errorf("failed to read hOCR data: %w", err)
 	}
 
-	hocrXML := string(hocrData)
+	// Override the generated hOCR with the existing one
+	result.HOCRXML = string(hocrData)
 	slog.Info("Using existing hOCR from Drupal", "nid", nid, "hocr_url", hocrURL)
 
-	// Create session
-	session := &models.CorrectionSession{
-		ID:        sessionID,
-		Images:    []models.ImageItem{},
-		Current:   0,
-		CreatedAt: time.Now(),
-		Config: models.EvalConfig{
-			Model:       "drupal_existing_hocr",
-			Prompt:      "Using existing hOCR from Drupal",
-			Temperature: 0.0,
-			Timestamp:   time.Now().Format("2006-01-02_15-04-05"),
-		},
+	// Extract filename and create session ID with Drupal prefix
+	filename := h.extractFilenameFromURL(imageURL, result.MD5Hash)
+	sessionID := fmt.Sprintf("drupal_%s_%s_%d", nid, filename, time.Now().Unix())
+
+	config := SessionConfig{
+		Model:       "drupal_existing_hocr",
+		Prompt:      "Using existing hOCR from Drupal",
+		Temperature: 0.0,
 	}
 
-	imageItem := models.ImageItem{
-		ID:            "img_1",
-		ImagePath:     imageFilename,
-		ImageURL:      "/static/uploads/" + imageFilename,
-		OriginalHOCR:  hocrXML,
-		CorrectedHOCR: "",
-		Completed:     false,
-		ImageWidth:    width,
-		ImageHeight:   height,
-	}
-
-	session.Images = []models.ImageItem{imageItem}
+	session := h.createImageSession(sessionID, result, config)
 	h.sessionStore.Set(sessionID, session)
 
 	slog.Info("Session created from Drupal with existing hOCR", "session_id", sessionID, "nid", nid)
@@ -862,145 +822,22 @@ func (h *Handler) createSessionFromDrupalWithExistingHOCR(imageURL, hocrURL, nid
 }
 
 func (h *Handler) createSessionFromDrupalWithNewHOCR(imageURL, nid string) (string, error) {
-	// Download image from URL (similar to createSessionFromURL)
-	resp, err := http.Get(imageURL)
+	result, err := h.processImageFromURL(imageURL)
 	if err != nil {
-		return "", fmt.Errorf("failed to download image: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("failed to download image: HTTP %d", resp.StatusCode)
+		return "", err
 	}
 
-	// Read image data
-	imageData, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read image data: %w", err)
-	}
-
-	// Get content type from response
-	contentType := resp.Header.Get("Content-Type")
-
-	// Convert JP2/TIFF images using Houdini if needed
-	originalImageData := imageData
-	if needsHoudiniConversion(contentType, imageURL) {
-		slog.Info("Image requires Houdini conversion", "content_type", contentType, "url", imageURL)
-		convertedData, err := h.convertImageViaHoudini(imageData, contentType)
-		if err != nil {
-			return "", fmt.Errorf("failed to convert image via Houdini: %w", err)
-		}
-		imageData = convertedData
-		contentType = "image/jpeg" // Houdini converts to JPEG
-	}
-
-	// Calculate MD5 hash of the original image data for consistent caching
-	md5Hash := utils.CalculateDataMD5(originalImageData)
-
-	// Extract filename from URL or use md5 hash
-	filename := md5Hash
-	if urlParts := strings.Split(imageURL, "/"); len(urlParts) > 0 {
-		lastPart := urlParts[len(urlParts)-1]
-		if lastPart != "" && strings.Contains(lastPart, ".") {
-			filename = strings.TrimSuffix(lastPart, filepath.Ext(lastPart))
-		}
-	}
-
-	// Use NID in session name for Drupal sessions
+	// Extract filename and create session ID with Drupal prefix
+	filename := h.extractFilenameFromURL(imageURL, result.MD5Hash)
 	sessionID := fmt.Sprintf("drupal_%s_%s_%d", nid, filename, time.Now().Unix())
 
-	// Determine file extension from content type (which may have been updated by Houdini conversion)
-	ext := ".jpg" // default
-	switch contentType {
-	case "image/png":
-		ext = ".png"
-	case "image/gif":
-		ext = ".gif"
-	case "image/webp":
-		ext = ".webp"
-	default:
-		// Try to get extension from URL
-		if urlExt := filepath.Ext(imageURL); urlExt != "" {
-			ext = urlExt
-		}
+	config := SessionConfig{
+		Model:       "tesseract_with_chatgpt",
+		Prompt:      "Tesseract + ChatGPT OCR with hOCR conversion for Drupal",
+		Temperature: 0.0,
 	}
 
-	uploadsDir := "uploads"
-	if err := os.MkdirAll(uploadsDir, 0755); err != nil {
-		return "", fmt.Errorf("failed to create uploads directory: %w", err)
-	}
-
-	imageFilename := md5Hash + ext
-	hocrFilename := md5Hash + ".xml"
-	imageFilePath := filepath.Join(uploadsDir, imageFilename)
-	hocrFilePath := filepath.Join(uploadsDir, hocrFilename)
-
-	// Save image file
-	if err := os.WriteFile(imageFilePath, imageData, 0644); err != nil {
-		return "", fmt.Errorf("failed to save image: %w", err)
-	}
-
-	slog.Info("Image downloaded and saved", "filename", imageFilename, "md5", md5Hash, "url", imageURL)
-
-	// Get image dimensions
-	width, height := utils.GetImageDimensions(imageFilePath)
-
-	// Process hOCR (check cache first, then generate via Tesseract + ChatGPT)
-	var hocrXML string
-	if _, err := os.Stat(hocrFilePath); err == nil {
-		hocrData, err := os.ReadFile(hocrFilePath)
-		if err != nil {
-			slog.Warn("Failed to read existing hOCR file", "error", err, "path", hocrFilePath)
-			hocrXML, err = h.getOCRForImage(imageFilePath)
-			if err != nil {
-				return "", fmt.Errorf("failed to process image with OCR: %w", err)
-			}
-			if err := os.WriteFile(hocrFilePath, []byte(hocrXML), 0644); err != nil {
-				slog.Warn("Failed to save hOCR file", "error", err)
-			}
-		} else {
-			hocrXML = string(hocrData)
-			slog.Info("Using cached hOCR", "filename", hocrFilename)
-		}
-	} else {
-		hocrXML, err = h.getOCRForImage(imageFilePath)
-		if err != nil {
-			return "", fmt.Errorf("failed to process image with OCR: %w", err)
-		}
-
-		if err := os.WriteFile(hocrFilePath, []byte(hocrXML), 0644); err != nil {
-			slog.Warn("Failed to save hOCR file", "error", err)
-		} else {
-			slog.Info("hOCR cached", "filename", hocrFilename)
-		}
-	}
-
-	// Create session
-	session := &models.CorrectionSession{
-		ID:        sessionID,
-		Images:    []models.ImageItem{},
-		Current:   0,
-		CreatedAt: time.Now(),
-		Config: models.EvalConfig{
-			Model:       "tesseract_with_chatgpt",
-			Prompt:      "Tesseract + ChatGPT OCR with hOCR conversion for Drupal",
-			Temperature: 0.0,
-			Timestamp:   time.Now().Format("2006-01-02_15-04-05"),
-		},
-	}
-
-	imageItem := models.ImageItem{
-		ID:            "img_1",
-		ImagePath:     imageFilename,
-		ImageURL:      "/static/uploads/" + imageFilename,
-		OriginalHOCR:  hocrXML,
-		CorrectedHOCR: "",
-		Completed:     false,
-		ImageWidth:    width,
-		ImageHeight:   height,
-	}
-
-	session.Images = []models.ImageItem{imageItem}
+	session := h.createImageSession(sessionID, result, config)
 	h.sessionStore.Set(sessionID, session)
 
 	slog.Info("Session created from Drupal with new hOCR", "session_id", sessionID, "nid", nid)
