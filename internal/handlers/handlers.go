@@ -218,10 +218,7 @@ func (h *Handler) HandleUpload(w http.ResponseWriter, r *http.Request) {
 		Current:   0,
 		CreatedAt: time.Now(),
 		Config: models.EvalConfig{
-			Model:       h.ocrService.GetDetectionMethod(),
-			Prompt:      fmt.Sprintf("%s OCR with hOCR conversion", h.ocrService.GetDetectionMethod()),
-			Temperature: 0.0,
-			Timestamp:   time.Now().Format("2006-01-02_15-04-05"),
+			Timestamp: time.Now().Format("2006-01-02_15-04-05"),
 		},
 	}
 
@@ -276,7 +273,6 @@ func (h *Handler) HandleUpload(w http.ResponseWriter, r *http.Request) {
 			slog.Info("Using cached hOCR", "filename", hocrFilename)
 		}
 	} else {
-		slog.Info("Generating new hOCR via Tesseract + ChatGPT", "filename", imageFilename)
 		hocrXML, err = h.getOCRForImage(imageFilePath)
 		if err != nil {
 			slog.Warn("Failed to get hOCR from OCR service", "error", err)
@@ -424,7 +420,6 @@ func (h *Handler) createSessionFromURL(imageURL string) (string, error) {
 			slog.Info("Using cached hOCR", "filename", hocrFilename)
 		}
 	} else {
-		slog.Info("Generating new hOCR via Tesseract + ChatGPT", "filename", imageFilename)
 		hocrXML, err = h.getOCRForImage(imageFilePath)
 		if err != nil {
 			return "", fmt.Errorf("failed to process image with OCR: %w", err)
@@ -444,10 +439,7 @@ func (h *Handler) createSessionFromURL(imageURL string) (string, error) {
 		Current:   0,
 		CreatedAt: time.Now(),
 		Config: models.EvalConfig{
-			Model:       h.ocrService.GetDetectionMethod(),
-			Prompt:      fmt.Sprintf("%s OCR with hOCR conversion", h.ocrService.GetDetectionMethod()),
-			Temperature: 0.0,
-			Timestamp:   time.Now().Format("2006-01-02_15-04-05"),
+			Timestamp: time.Now().Format("2006-01-02_15-04-05"),
 		},
 	}
 
@@ -549,6 +541,7 @@ func (h *Handler) HandleHOCRParse(w http.ResponseWriter, r *http.Request) {
 	var request struct {
 		HOCR string `json:"hocr"`
 	}
+	slog.Info("PARSING")
 
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
@@ -708,8 +701,6 @@ func (h *Handler) createSessionFromDrupalNode(nid string) (string, error) {
 		slog.Info("Using existing hOCR from Drupal", "nid", nid, "hocr_uri", hocrFile.URI)
 		sessionID, sessionErr = h.createSessionFromDrupalWithExistingHOCR(imageURL, hocrFile.ViewNode+hocrFile.URI, nid)
 	} else {
-		// Generate new hOCR using Tesseract + ChatGPT (same as normal image upload)
-		slog.Info("Generating new hOCR via Tesseract + ChatGPT", "nid", nid, "hocr_uri", hocrFile.URI)
 		sessionID, sessionErr = h.createSessionFromDrupalWithNewHOCR(imageURL, nid)
 	}
 
@@ -870,7 +861,6 @@ func (h *Handler) createSessionFromDrupalWithExistingHOCR(imageURL, hocrURL, nid
 	return sessionID, nil
 }
 
-// createSessionFromDrupalWithNewHOCR creates a session and generates new hOCR via Tesseract + ChatGPT
 func (h *Handler) createSessionFromDrupalWithNewHOCR(imageURL, nid string) (string, error) {
 	// Download image from URL (similar to createSessionFromURL)
 	resp, err := http.Get(imageURL)
@@ -973,7 +963,6 @@ func (h *Handler) createSessionFromDrupalWithNewHOCR(imageURL, nid string) (stri
 			slog.Info("Using cached hOCR", "filename", hocrFilename)
 		}
 	} else {
-		slog.Info("Generating new hOCR via Tesseract + ChatGPT", "filename", imageFilename)
 		hocrXML, err = h.getOCRForImage(imageFilePath)
 		if err != nil {
 			return "", fmt.Errorf("failed to process image with OCR: %w", err)

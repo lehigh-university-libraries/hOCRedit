@@ -132,7 +132,6 @@ func (h *Converter) convertBlockToLines(block models.Block) []models.HOCRLine {
 }
 
 func (h *Converter) convertParagraphToLines(paragraph models.Paragraph) []models.HOCRLine {
-	wordsGroups := h.groupWordsIntoLines(paragraph.Words)
 	var lines []models.HOCRLine
 
 	for _, ocrWord := range paragraph.Words {
@@ -152,70 +151,6 @@ func (h *Converter) convertParagraphToLines(paragraph models.Paragraph) []models
 	}
 
 	return lines
-}
-
-func (h *Converter) groupWordsIntoLines(words []models.Word) [][]models.Word {
-	if len(words) == 0 {
-		return nil
-	}
-
-	var lines [][]models.Word
-	var currentLine []models.Word
-
-	for i, word := range words {
-		currentLine = append(currentLine, word)
-
-		shouldEndLine := false
-
-		if len(word.Symbols) > 0 {
-			lastSymbol := word.Symbols[len(word.Symbols)-1]
-			if lastSymbol.Property != nil && lastSymbol.Property.DetectedBreak != nil {
-				breakType := lastSymbol.Property.DetectedBreak.Type
-				if breakType == "LINE_BREAK" || breakType == "EOL_SURE_SPACE" {
-					shouldEndLine = true
-				}
-			}
-		}
-
-		if i == len(words)-1 {
-			shouldEndLine = true
-		}
-
-		if shouldEndLine {
-			lines = append(lines, currentLine)
-			currentLine = nil
-		}
-	}
-
-	return lines
-}
-
-func (h *Converter) calculateLineBBoxStruct(words []models.Word) models.BBox {
-	if len(words) == 0 {
-		return models.BBox{X1: 0, Y1: 0, X2: 0, Y2: 0}
-	}
-
-	minX, minY := int(^uint(0)>>1), int(^uint(0)>>1)
-	maxX, maxY := 0, 0
-
-	for _, word := range words {
-		for _, vertex := range word.BoundingBox.Vertices {
-			if vertex.X < minX {
-				minX = vertex.X
-			}
-			if vertex.X > maxX {
-				maxX = vertex.X
-			}
-			if vertex.Y < minY {
-				minY = vertex.Y
-			}
-			if vertex.Y > maxY {
-				maxY = vertex.Y
-			}
-		}
-	}
-
-	return models.BBox{X1: minX, Y1: minY, X2: maxX, Y2: maxY}
 }
 
 func (h *Converter) convertOCRWordToHOCRWord(ocrWord models.Word, lineID string) models.HOCRWord {

@@ -74,7 +74,7 @@ func traverseElementsWithLineContext(element XMLElement, words *[]models.HOCRWor
 	// Parse word elements with line context
 	if isWordElement(element) {
 		word, err := parseWordElement(element)
-		if err == nil && word.ID != "" {
+		if err == nil && word.ID != "" && isValidWordText(word.Text) {
 			word.LineID = currentLineID
 			*words = append(*words, word)
 		}
@@ -118,24 +118,40 @@ func parseLineElement(element XMLElement) (models.HOCRLine, error) {
 		}
 	}
 
-	var words []models.HOCRWord
-	traverseWordsInLine(element, &words, line.ID)
-	line.Words = words
+	// Find the first word in this line and add only that one
+	var firstWord *models.HOCRWord
+	findFirstWordInLine(element, &firstWord, line.ID)
+
+	if firstWord != nil {
+		line.Words = []models.HOCRWord{*firstWord}
+	} else {
+		line.Words = []models.HOCRWord{}
+	}
 
 	return line, nil
 }
 
-func traverseWordsInLine(element XMLElement, words *[]models.HOCRWord, lineID string) {
+func findFirstWordInLine(element XMLElement, firstWord **models.HOCRWord, lineID string) {
+	// If we already found a word, don't look for more
+	if *firstWord != nil {
+		return
+	}
+
 	if isWordElement(element) {
 		word, err := parseWordElement(element)
-		if err == nil && word.ID != "" {
+		if err == nil && word.ID != "" && isValidWordText(word.Text) {
 			word.LineID = lineID
-			*words = append(*words, word)
+			*firstWord = &word
+			return
 		}
 	}
 
 	for _, child := range element.Children {
-		traverseWordsInLine(child, words, lineID)
+		findFirstWordInLine(child, firstWord, lineID)
+		// Early return if we found a word
+		if *firstWord != nil {
+			return
+		}
 	}
 }
 
@@ -206,4 +222,9 @@ func parseTitleAttribute(title string, word *models.HOCRWord) error {
 	}
 
 	return nil
+}
+
+func isValidWordText(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	return trimmed != ""
 }

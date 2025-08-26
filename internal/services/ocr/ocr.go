@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/lehigh-university-libraries/hocr-edit/internal/models"
-	gosseract "github.com/otiai10/gosseract/v2"
 )
 
 type Service struct{}
@@ -32,28 +31,12 @@ func New() *Service {
 	return &Service{}
 }
 
-func (s *Service) ProcessImage(imagePath string) (models.OCRResponse, error) {
-	return s.detectWordBoundariesWithTesseract(imagePath)
-}
-
 func (s *Service) ProcessImageToHOCR(imagePath string) (string, error) {
-	var ocrResponse models.OCRResponse
-	var err error
-	if os.Getenv("TESSERACT_WORD_BOUNDARIES") != "" {
-		ocrResponse, err = s.detectWordBoundariesWithTesseract(imagePath)
-		if err != nil {
-			return "", fmt.Errorf("failed to detect word boundaries with both methods: %w", err)
-		}
-	} else {
-		ocrResponse, err = s.detectWordBoundariesCustom(imagePath)
-		if err != nil {
-			return "", fmt.Errorf("failed to detect word boundaries with both methods: %w", err)
-		}
+	ocrResponse, err := s.detectWordBoundariesCustom(imagePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to detect word boundaries with both methods: %w", err)
 	}
 
-	slog.Info("Detected word boundaries with Tesseract", "word_count", s.countWords(ocrResponse))
-
-	// Step 2: Create stitched image with hOCR markup overlaid
 	stitchedImagePath, err := s.createStitchedImageWithHOCRMarkup(imagePath, ocrResponse)
 	if err != nil {
 		slog.Warn("Failed to create stitched image, using Tesseract output only", "error", err)
@@ -63,50 +46,15 @@ func (s *Service) ProcessImageToHOCR(imagePath string) (string, error) {
 
 	slog.Info("Created stitched image with hOCR markup", "path", stitchedImagePath)
 
-	// Step 3: Have ChatGPT transcribe the hOCR markup from the stitched image
 	hocrResult, err := s.transcribeWithChatGPT(stitchedImagePath)
 	if err != nil {
-		slog.Warn("ChatGPT transcription failed, using Tesseract output only", "error", err)
-		return s.convertToBasicHOCR(ocrResponse), nil
+		slog.Warn("ChatGPT transcription failed", "err", err)
+		return "", err
 	}
 
-	slog.Info("ChatGPT transcription completed", "result_length", len(hocrResult))
+	slog.Info("ChatGPT transcription completed", "result_length", hocrResult)
 
-	// Step 4: Wrap the result in a complete hOCR document
 	return s.wrapInHOCRDocument(hocrResult), nil
-}
-
-func (s *Service) GetDetectionMethod() string {
-	return "tesseract_with_custom_fallback_and_chatgpt"
-}
-
-// detectWordBoundariesWithTesseract uses Tesseract to find word boundaries
-func (s *Service) detectWordBoundariesWithTesseract(imagePath string) (models.OCRResponse, error) {
-	client := gosseract.NewClient()
-	defer client.Close()
-
-	// Set the image
-	err := client.SetImage(imagePath)
-	if err != nil {
-		return models.OCRResponse{}, fmt.Errorf("failed to set image in Tesseract: %w", err)
-	}
-
-	// Get bounding boxes for words
-	boxes, err := client.GetBoundingBoxes(gosseract.RIL_TEXTLINE)
-	if err != nil {
-		return models.OCRResponse{}, fmt.Errorf("failed to get bounding boxes from Tesseract: %w", err)
-	}
-
-	// Get image dimensions
-	width, height, err := s.getImageDimensions(imagePath)
-	if err != nil {
-		return models.OCRResponse{}, fmt.Errorf("failed to get image dimensions: %w", err)
-	}
-
-	slog.Info("Tesseract detected words", "count", len(boxes), "image_size", fmt.Sprintf("%dx%d", width, height))
-
-	// Convert Tesseract boxes to our OCR response format
-	return s.convertTesseractBoxesToOCRResponse(boxes, width, height), nil
 }
 
 func (s *Service) getImageDimensions(imagePath string) (int, int, error) {
@@ -124,85 +72,6 @@ func (s *Service) getImageDimensions(imagePath string) (int, int, error) {
 	}
 
 	return width, height, nil
-}
-
-func (s *Service) convertTesseractBoxesToOCRResponse(boxes []gosseract.BoundingBox, width, height int) models.OCRResponse {
-	var paragraphs []models.Paragraph
-
-	// Convert each Tesseract word box to a paragraph containing a single word
-	for _, box := range boxes {
-		// Skip empty words
-		if strings.TrimSpace(box.Word) == "" {
-			continue
-		}
-
-		word := models.Word{
-			BoundingBox: models.BoundingPoly{
-				Vertices: []models.Vertex{
-					{X: box.Box.Min.X, Y: box.Box.Min.Y},
-					{X: box.Box.Max.X, Y: box.Box.Min.Y},
-					{X: box.Box.Max.X, Y: box.Box.Max.Y},
-					{X: box.Box.Min.X, Y: box.Box.Max.Y},
-				},
-			},
-			Symbols: []models.Symbol{
-				{
-					BoundingBox: models.BoundingPoly{
-						Vertices: []models.Vertex{
-							{X: box.Box.Min.X, Y: box.Box.Min.Y},
-							{X: box.Box.Max.X, Y: box.Box.Min.Y},
-							{X: box.Box.Max.X, Y: box.Box.Max.Y},
-							{X: box.Box.Min.X, Y: box.Box.Max.Y},
-						},
-					},
-					Text: box.Word, // Use actual text from Tesseract
-				},
-			},
-		}
-
-		paragraph := models.Paragraph{
-			BoundingBox: models.BoundingPoly{
-				Vertices: []models.Vertex{
-					{X: box.Box.Min.X, Y: box.Box.Min.Y},
-					{X: box.Box.Max.X, Y: box.Box.Min.Y},
-					{X: box.Box.Max.X, Y: box.Box.Max.Y},
-					{X: box.Box.Min.X, Y: box.Box.Max.Y},
-				},
-			},
-			Words: []models.Word{word},
-		}
-		paragraphs = append(paragraphs, paragraph)
-	}
-
-	block := models.Block{
-		BoundingBox: models.BoundingPoly{
-			Vertices: []models.Vertex{
-				{X: 0, Y: 0},
-				{X: width, Y: 0},
-				{X: width, Y: height},
-				{X: 0, Y: height},
-			},
-		},
-		BlockType:  "TEXT",
-		Paragraphs: paragraphs,
-	}
-
-	page := models.Page{
-		Width:  width,
-		Height: height,
-		Blocks: []models.Block{block},
-	}
-
-	return models.OCRResponse{
-		Responses: []models.Response{
-			{
-				FullTextAnnotation: &models.FullTextAnnotation{
-					Pages: []models.Page{page},
-					Text:  "Tesseract word detection with ChatGPT transcription",
-				},
-			},
-		},
-	}
 }
 
 // detectWordBoundariesCustom uses our own image processing algorithm to find word boundaries
@@ -436,7 +305,7 @@ func (s *Service) mergeNearbyComponents(components []WordBox) []WordBox {
 func (s *Service) shouldMergeComponents(a, b WordBox) bool {
 	// Calculate horizontal and vertical distances
 	horizontalGap := b.X - (a.X + a.Width)
-	verticalOverlap := !(b.Y+b.Height < a.Y || b.Y > a.Y+a.Height)
+	verticalOverlap := b.Y+b.Height >= a.Y && b.Y <= a.Y+a.Height
 
 	// Merge if components are close horizontally and have vertical overlap
 	maxGap := max(a.Height, b.Height) / 3 // Allow gap up to 1/3 of character height
@@ -546,7 +415,7 @@ func (s *Service) wordsOnSameLine(currentLineWords []WordBox, newWord WordBox) b
 	currentLineBottom := maxY + tolerance
 	currentLineTop := minY - tolerance
 
-	return !(newWord.Y+newWord.Height < currentLineTop || newWord.Y > currentLineBottom)
+	return newWord.Y+newWord.Height >= currentLineTop && newWord.Y <= currentLineBottom
 }
 
 // createLineFromWords creates a LineBox from a group of words
@@ -919,10 +788,7 @@ func (s *Service) callChatGPT(request ChatGPTRequest) (string, error) {
 	}
 
 	content := strings.TrimSpace(chatGPTResponse.Choices[0].Message.Content)
-	slog.Info("Raw response", "content", content)
-	// Clean up the ChatGPT response to ensure valid XML
 	content = s.cleanChatGPTResponse(content)
-	slog.Info("Clean response", "content", content)
 
 	return content, nil
 }
@@ -1080,7 +946,7 @@ func (s *Service) wrapInHOCRDocument(content string) string {
 <head>
 <title></title>
 <meta http-equiv="Content-Type" content="text/html;charset=utf-8" />
-<meta name='ocr-system' content='tesseract-with-chatgpt' />
+<meta name='ocr-system' content='hOCRedit' />
 </head>
 <body>
 <div class='ocr_page' id='page_1'>
@@ -1088,21 +954,6 @@ func (s *Service) wrapInHOCRDocument(content string) string {
 </div>
 </body>
 </html>`, content)
-}
-
-func (s *Service) countWords(response models.OCRResponse) int {
-	count := 0
-	if len(response.Responses) == 0 || response.Responses[0].FullTextAnnotation == nil {
-		return count
-	}
-	for _, page := range response.Responses[0].FullTextAnnotation.Pages {
-		for _, block := range page.Blocks {
-			for _, paragraph := range block.Paragraphs {
-				count += len(paragraph.Words)
-			}
-		}
-	}
-	return count
 }
 
 func max(a, b int) int {
