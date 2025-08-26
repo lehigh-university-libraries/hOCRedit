@@ -7,7 +7,6 @@ RUN apk add --no-cache go && \
 
 COPY --chown=hocr:hocr main.go go.* docker-entrypoint.sh ./
 COPY --chown=hocr:hocr internal/ ./internal/
-COPY --chown=hocr:hocr pkg/ ./pkg/
 
 RUN go mod download && \
   go build -o /app/hOCRedit && \
