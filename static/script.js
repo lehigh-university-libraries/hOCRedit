@@ -1,5 +1,12 @@
+// ============================================================================
+// GLOBAL STATE VARIABLES
+// ============================================================================
+
+// Session and image state
 let currentSession = null;
 let currentImageIndex = 0;
+
+// hOCR data and navigation state
 let hocrData = null;
 let selectedWordId = null;
 let currentWordIndex = -1;
@@ -7,15 +14,17 @@ let currentLineWords = [];
 let currentLineId = null;
 let allLines = [];
 let currentLineIndex = -1;
-let imageScale = 1;
-let showLowConfidence = false;
 
-// Drawing mode variables
+// Drawing mode state
 let drawingMode = false;
 let isDrawing = false;
 let drawingStart = null;
 let currentDrawingBox = null;
 let pendingAnnotation = null;
+
+// ============================================================================
+// INITIALIZATION AND EVENT HANDLERS
+// ============================================================================
 
 // Load sessions and check URL parameters on page load
 document.addEventListener("DOMContentLoaded", function () {
@@ -90,7 +99,10 @@ document.addEventListener("keydown", function (e) {
   }
 });
 
-// Drawing mode functions
+// ============================================================================
+// DRAWING MODE FUNCTIONS
+// ============================================================================
+
 function toggleDrawingMode() {
   drawingMode = !drawingMode;
   const btn = document.getElementById("drawing-mode-btn");
@@ -362,6 +374,10 @@ function closeAnnotationModal() {
   document.getElementById("annotation-text").onkeydown = null;
 }
 
+// ============================================================================
+// NAVIGATION FUNCTIONS
+// ============================================================================
+
 function navigateToNextWord() {
   if (!hocrData || !hocrData.words || hocrData.words.length === 0) return;
 
@@ -520,11 +536,7 @@ function updateWordCounter() {
 }
 
 function clearSelection() {
-  selectedWordId = null;
-  currentWordIndex = -1;
-  currentLineWords = [];
-  currentLineId = null;
-  currentLineIndex = -1;
+  resetNavigationState();
 
   document.querySelectorAll(".hocr-line-box").forEach((box) => {
     box.classList.remove("selected", "adjacent-clickable");
@@ -542,6 +554,14 @@ function clearSelection() {
   updateWordCounter();
 }
 
+function resetNavigationState() {
+  selectedWordId = null;
+  currentWordIndex = -1;
+  currentLineWords = [];
+  currentLineId = null;
+  currentLineIndex = -1;
+}
+
 function applyWordChanges() {
   if (selectedWordId) {
     updateSelectedWord();
@@ -549,6 +569,10 @@ function applyWordChanges() {
     setTimeout(() => navigateToNextWord(), 100);
   }
 }
+
+// ============================================================================
+// SESSION AND FILE MANAGEMENT
+// ============================================================================
 
 async function loadSessions() {
   try {
@@ -841,17 +865,18 @@ async function loadCurrentImage() {
     updateMetrics();
 
     // Reset navigation state for new image
-    currentWordIndex = -1;
-    selectedWordId = null;
-    currentLineWords = [];
-    currentLineId = null;
+    resetNavigationState();
     allLines = [];
-    currentLineIndex = -1;
     clearSelection();
   };
 
   img.src = image.image_url || "/static/uploads/" + image.image_path;
 }
+
+// ============================================================================
+// hOCR PARSING AND RENDERING
+// ============================================================================
+
 async function parseAndDisplayHOCR(hocrXML) {
   try {
     const response = await fetch("api/hocr/parse", {
@@ -861,59 +886,64 @@ async function parseAndDisplayHOCR(hocrXML) {
     });
     hocrData = await response.json();
 
-    // Sort words by reading order and renumber them sequentially
     if (hocrData && hocrData.words) {
       renumberWordIds();
-
-      // Ensure all words have proper array-format bboxes and line_ids
-      hocrData.words.forEach((word, index) => {
-        // Fix bbox format
-        if (
-          word.bbox &&
-          typeof word.bbox === "object" &&
-          !Array.isArray(word.bbox)
-        ) {
-          // Convert object format {x1, y1, x2, y2} to array format [x1, y1, x2, y2]
-          word.bbox = [
-            word.bbox.x1 || word.bbox[0] || 0,
-            word.bbox.y1 || word.bbox[1] || 0,
-            word.bbox.x2 || word.bbox[2] || 0,
-            word.bbox.y2 || word.bbox[3] || 0,
-          ];
-        }
-
-        // Ensure bbox is valid array with 4 numeric values
-        if (!Array.isArray(word.bbox) || word.bbox.length !== 4) {
-          console.error("Invalid bbox format for word:", word);
-          word.bbox = [0, 0, 100, 20]; // fallback bbox
-        }
-
-        // Ensure all bbox values are numbers
-        word.bbox = word.bbox.map((val) => {
-          const num = parseInt(val, 10);
-          return isNaN(num) ? 0 : num;
-        });
-
-        // Fix line_id issues
-        if (!word.line_id && word.LineID) {
-          word.line_id = word.LineID;
-        }
-        if (!word.line_id) {
-          // Generate a line_id if missing
-          word.line_id = `line_${index + 1}`;
-        }
-
-        // Ensure confidence is a number
-        if (typeof word.confidence !== "number") {
-          word.confidence = parseFloat(word.confidence) || 95;
-        }
-      });
+      normalizeWordData();
     }
 
     renderHOCROverlay();
     updateWordCounter();
   } catch (error) {
     console.error("Error parsing hOCR:", error);
+  }
+}
+
+function normalizeWordData() {
+  hocrData.words.forEach((word, index) => {
+    normalizeBoundingBox(word);
+    normalizeLineId(word, index);
+    normalizeConfidence(word);
+  });
+}
+
+function normalizeBoundingBox(word) {
+  // Fix bbox format
+  if (word.bbox && typeof word.bbox === "object" && !Array.isArray(word.bbox)) {
+    // Convert object format {x1, y1, x2, y2} to array format [x1, y1, x2, y2]
+    word.bbox = [
+      word.bbox.x1 || word.bbox[0] || 0,
+      word.bbox.y1 || word.bbox[1] || 0,
+      word.bbox.x2 || word.bbox[2] || 0,
+      word.bbox.y2 || word.bbox[3] || 0,
+    ];
+  }
+
+  // Ensure bbox is valid array with 4 numeric values
+  if (!Array.isArray(word.bbox) || word.bbox.length !== 4) {
+    console.error("Invalid bbox format for word:", word);
+    word.bbox = [0, 0, 100, 20]; // fallback bbox
+  }
+
+  // Ensure all bbox values are numbers
+  word.bbox = word.bbox.map((val) => {
+    const num = parseInt(val, 10);
+    return isNaN(num) ? 0 : num;
+  });
+}
+
+function normalizeLineId(word, index) {
+  if (!word.line_id && word.LineID) {
+    word.line_id = word.LineID;
+  }
+  if (!word.line_id) {
+    // Generate a line_id if missing
+    word.line_id = `line_${index + 1}`;
+  }
+}
+
+function normalizeConfidence(word) {
+  if (typeof word.confidence !== "number") {
+    word.confidence = parseFloat(word.confidence) || 95;
   }
 }
 
@@ -1289,43 +1319,6 @@ function updateLineText() {
   updateMetrics();
 }
 
-function updateWordText(wordId, newText) {
-  if (!hocrData || !hocrData.words) return;
-
-  const word = hocrData.words.find((w) => w.id === wordId);
-  if (word) {
-    word.text = newText;
-
-    // Update the main word editor if this is the selected word
-    if (wordId === selectedWordId) {
-      document.getElementById("word-text").value = newText;
-    }
-
-    // Update line editor display
-    const selectedWord = hocrData.words.find((w) => w.id === selectedWordId);
-    if (selectedWord) {
-      displayLineEditor(selectedWord);
-    }
-
-    // Update hOCR and metrics
-    updateHOCRSource();
-    updateMetrics();
-  }
-}
-
-function escapeHTML(text) {
-  const div = document.createElement("div");
-  div.textContent = text;
-  return div.innerHTML;
-}
-
-function getConfidenceHTML(conf) {
-  let className = "conf-high";
-  if (conf < 60) className = "conf-low";
-  else if (conf < 80) className = "conf-medium";
-
-  return `<span class="confidence-indicator ${className}">${conf}%</span>`;
-}
 
 function updateSelectedWord() {
   if (!selectedWordId || !hocrData) return;
@@ -1354,11 +1347,7 @@ function deleteSelectedLine() {
     );
 
     // Clear selection
-    selectedWordId = null;
-    currentWordIndex = -1;
-    currentLineWords = [];
-    currentLineId = null;
-    currentLineIndex = -1;
+    resetNavigationState();
 
     // Hide line editor
     document.getElementById("line-editor").style.display = "none";
@@ -1481,18 +1470,6 @@ function escapeXML(text) {
     .replace(/'/g, "&#39;");
 }
 
-function toggleLowConfidence() {
-  showLowConfidence = !showLowConfidence;
-  document.querySelectorAll(".hocr-word-box").forEach((box) => {
-    if (showLowConfidence) {
-      box.style.display = box.classList.contains("low-confidence")
-        ? "block"
-        : "none";
-    } else {
-      box.style.display = "block";
-    }
-  });
-}
 
 function updateProgress() {
   const total = currentSession.images.length;
@@ -1571,12 +1548,8 @@ async function saveAndNext() {
   await saveSession();
 
   currentImageIndex++;
-  selectedWordId = null;
-  currentWordIndex = -1;
-  currentLineWords = [];
-  currentLineId = null;
+  resetNavigationState();
   allLines = [];
-  currentLineIndex = -1;
   document.getElementById("line-editor").style.display = "none";
   document.getElementById("no-selection").style.display = "block";
 
@@ -1586,12 +1559,8 @@ async function saveAndNext() {
 function previousImage() {
   if (currentImageIndex > 0) {
     currentImageIndex--;
-    selectedWordId = null;
-    currentWordIndex = -1;
-    currentLineWords = [];
-    currentLineId = null;
+    resetNavigationState();
     allLines = [];
-    currentLineIndex = -1;
     document.getElementById("line-editor").style.display = "none";
     document.getElementById("no-selection").style.display = "block";
     loadCurrentImage();
