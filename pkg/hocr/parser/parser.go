@@ -118,40 +118,25 @@ func parseLineElement(element XMLElement) (models.HOCRLine, error) {
 		}
 	}
 
-	// Find the first word in this line and add only that one
-	var firstWord *models.HOCRWord
-	findFirstWordInLine(element, &firstWord, line.ID)
-
-	if firstWord != nil {
-		line.Words = []models.HOCRWord{*firstWord}
-	} else {
-		line.Words = []models.HOCRWord{}
-	}
+	// Find ALL words in this line
+	var words []models.HOCRWord
+	findAllWordsInLine(element, &words, line.ID)
+	line.Words = words
 
 	return line, nil
 }
 
-func findFirstWordInLine(element XMLElement, firstWord **models.HOCRWord, lineID string) {
-	// If we already found a word, don't look for more
-	if *firstWord != nil {
-		return
-	}
-
+func findAllWordsInLine(element XMLElement, words *[]models.HOCRWord, lineID string) {
 	if isWordElement(element) {
 		word, err := parseWordElement(element)
 		if err == nil && word.ID != "" && isValidWordText(word.Text) {
 			word.LineID = lineID
-			*firstWord = &word
-			return
+			*words = append(*words, word)
 		}
 	}
 
 	for _, child := range element.Children {
-		findFirstWordInLine(child, firstWord, lineID)
-		// Early return if we found a word
-		if *firstWord != nil {
-			return
-		}
+		findAllWordsInLine(child, words, lineID)
 	}
 }
 
