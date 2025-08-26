@@ -27,7 +27,7 @@ docker run \
 
 ## Configuration
 
-See `[sample.env](./sample.env)`
+See [sample.env](./sample.env)
 
 ## Usage
 
@@ -38,7 +38,6 @@ See `[sample.env](./sample.env)`
 5. Monitor accuracy metrics in real-time
 6. Export corrected hOCR or save to repositories
 
-
 ## Support
 
 This project was sponsered thanks to a [Lyrasis Catalyst Fund](https://lyrasis.org/catalyst-fund/) grant awarded to Lehigh University.
@@ -46,4 +45,3 @@ This project was sponsered thanks to a [Lyrasis Catalyst Fund](https://lyrasis.o
 ## License
 
 Apache 2.0
-

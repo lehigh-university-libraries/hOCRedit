@@ -21,7 +21,7 @@ import (
 type Service struct{}
 
 func NewService() *Service {
-	slog.Info("Initializing hOCR service (Tesseract word detection + ChatGPT transcription)")
+	slog.Info("Initializing hOCR service (Custom word detection + ChatGPT transcription)")
 	return &Service{}
 }
 
@@ -33,7 +33,7 @@ func (s *Service) ProcessImageToHOCR(imagePath string) (string, error) {
 
 	stitchedImagePath, err := s.createStitchedImageWithHOCRMarkup(imagePath, ocrResponse)
 	if err != nil {
-		slog.Warn("Failed to create stitched image, using Tesseract output only", "error", err)
+		slog.Warn("Failed to create stitched image, using basic hOCR output only", "error", err)
 		return s.convertToBasicHOCR(ocrResponse), nil
 	}
 	defer os.Remove(stitchedImagePath)

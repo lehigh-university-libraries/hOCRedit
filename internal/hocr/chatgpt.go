@@ -408,7 +408,7 @@ func (s *Service) convertToBasicHOCR(response models.OCRResponse) string {
 				for _, word := range paragraph.Words {
 					if len(word.BoundingBox.Vertices) >= 4 && len(word.Symbols) > 0 {
 						bbox := word.BoundingBox
-						text := html.EscapeString(word.Symbols[0].Text) // Use Tesseract-detected text with XML escaping
+						text := html.EscapeString(word.Symbols[0].Text) // Use detected text with XML escaping
 						line := fmt.Sprintf(`<span class='ocrx_line' id='line_%d' title='bbox %d %d %d %d'><span class='ocrx_word' id='word_%d' title='bbox %d %d %d %d'>%s</span></span>`,
 							wordIndex+1,
 							bbox.Vertices[0].X, bbox.Vertices[0].Y,

@@ -195,8 +195,8 @@ func (h *Handler) createSessionFromDrupalWithNewHOCR(imageURL, nid string) (stri
 	sessionID := fmt.Sprintf("drupal_%s_%s_%d", nid, filename, time.Now().Unix())
 
 	config := SessionConfig{
-		Model:       "tesseract_with_chatgpt",
-		Prompt:      "Tesseract + ChatGPT OCR with hOCR conversion for Drupal",
+		Model:       "custom_with_chatgpt",
+		Prompt:      "Custom word detection + ChatGPT OCR with hOCR conversion for Drupal",
 		Temperature: 0.0,
 	}
 

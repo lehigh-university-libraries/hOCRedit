@@ -22,4 +22,4 @@ if [ -f "$CA_SRC" ]; then
 
 fi
 
-exec gosu hocr /app/hocr
+exec gosu hocr /app/hOCRedit
