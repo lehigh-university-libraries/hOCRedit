@@ -17,6 +17,35 @@ import (
 	"github.com/lehigh-university-libraries/hOCRedit/internal/models"
 )
 
+type ChatGPTRequest struct {
+	Model       string           `json:"model"`
+	Temperature float64          `json:"temperature,omitempty"`
+	Messages    []ChatGPTMessage `json:"messages"`
+}
+
+type ChatGPTMessage struct {
+	Role    string           `json:"role"`
+	Content []ChatGPTContent `json:"content"`
+}
+
+type ChatGPTContent struct {
+	Type     string           `json:"type"`
+	Text     string           `json:"text,omitempty"`
+	ImageURL *ChatGPTImageURL `json:"image_url,omitempty"`
+}
+
+type ChatGPTImageURL struct {
+	URL string `json:"url"`
+}
+
+type ChatGPTResponse struct {
+	Choices []struct {
+		Message struct {
+			Content string `json:"content"`
+		} `json:"message"`
+	} `json:"choices"`
+}
+
 func (s *Service) createStitchedImageWithHOCRMarkup(imagePath string, response models.OCRResponse) (string, error) {
 	tempDir := "/tmp"
 	baseName := strings.TrimSuffix(filepath.Base(imagePath), filepath.Ext(imagePath))
@@ -209,35 +238,6 @@ Return only the hOCR markup with transcribed text content.`,
 	}
 
 	return s.callChatGPT(request)
-}
-
-type ChatGPTRequest struct {
-	Model       string           `json:"model"`
-	Temperature float64          `json:"temperature,omitempty"`
-	Messages    []ChatGPTMessage `json:"messages"`
-}
-
-type ChatGPTMessage struct {
-	Role    string           `json:"role"`
-	Content []ChatGPTContent `json:"content"`
-}
-
-type ChatGPTContent struct {
-	Type     string           `json:"type"`
-	Text     string           `json:"text,omitempty"`
-	ImageURL *ChatGPTImageURL `json:"image_url,omitempty"`
-}
-
-type ChatGPTImageURL struct {
-	URL string `json:"url"`
-}
-
-type ChatGPTResponse struct {
-	Choices []struct {
-		Message struct {
-			Content string `json:"content"`
-		} `json:"message"`
-	} `json:"choices"`
 }
 
 func (s *Service) callChatGPT(request ChatGPTRequest) (string, error) {
