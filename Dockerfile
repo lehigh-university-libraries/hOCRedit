@@ -17,7 +17,6 @@ RUN --mount=type=bind,from=leptonica,source=/packages,target=/packages \
 
 COPY --chown=nobody:nogroup main.go go.* docker-entrypoint.sh ./
 COPY --chown=nobody:nogroup internal/ ./internal/
-COPY --chown=nobody:nogroup pkg/ ./pkg/
 
 ENV CGO_ENABLED=1
 
