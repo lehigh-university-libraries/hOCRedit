@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/lehigh-university-libraries/hocr-edit/internal/models"
-	"github.com/lehigh-university-libraries/hocr-edit/internal/services/hocr"
 	"github.com/lehigh-university-libraries/hocr-edit/internal/services/ocr"
 	"github.com/lehigh-university-libraries/hocr-edit/internal/storage"
 	"github.com/lehigh-university-libraries/hocr-edit/internal/utils"
@@ -265,7 +264,7 @@ func (h *Handler) HandleUpload(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("Failed to read existing hOCR file", "error", err, "path", hocrFilePath)
 			hocrXML, err = h.getOCRForImage(imageFilePath)
 			if err != nil {
-				slog.Warn("Failed to get hOCR from Google Cloud Vision", "error", err)
+				slog.Warn("Failed to get hOCR from OCR service", "error", err)
 				utils.RespondWithError(w, "Failed to process image", http.StatusInternalServerError)
 				return
 			}
@@ -277,10 +276,10 @@ func (h *Handler) HandleUpload(w http.ResponseWriter, r *http.Request) {
 			slog.Info("Using cached hOCR", "filename", hocrFilename)
 		}
 	} else {
-		slog.Info("Generating new hOCR via Google Cloud Vision", "filename", imageFilename)
+		slog.Info("Generating new hOCR via Tesseract + ChatGPT", "filename", imageFilename)
 		hocrXML, err = h.getOCRForImage(imageFilePath)
 		if err != nil {
-			slog.Warn("Failed to get hOCR from Google Cloud Vision", "error", err)
+			slog.Warn("Failed to get hOCR from OCR service", "error", err)
 			utils.RespondWithError(w, "Failed to process image", http.StatusInternalServerError)
 			return
 		}
@@ -425,7 +424,7 @@ func (h *Handler) createSessionFromURL(imageURL string) (string, error) {
 			slog.Info("Using cached hOCR", "filename", hocrFilename)
 		}
 	} else {
-		slog.Info("Generating new hOCR via Google Cloud Vision", "filename", imageFilename)
+		slog.Info("Generating new hOCR via Tesseract + ChatGPT", "filename", imageFilename)
 		hocrXML, err = h.getOCRForImage(imageFilePath)
 		if err != nil {
 			return "", fmt.Errorf("failed to process image with OCR: %w", err)
@@ -471,24 +470,8 @@ func (h *Handler) createSessionFromURL(imageURL string) (string, error) {
 }
 
 func (h *Handler) getOCRForImage(imagePath string) (string, error) {
-	// Check if we should use direct hOCR processing (for LLM OCR)
-	if h.ocrService.GetDetectionMethod() == "llm_with_boundary_boxes" {
-		return h.ocrService.ProcessImageToHOCR(imagePath)
-	}
-
-	// Use traditional path: OCR -> GCVResponse -> hOCR conversion
-	gcvResponse, err := h.ocrService.ProcessImage(imagePath)
-	if err != nil {
-		return "", err
-	}
-
-	converter := hocr.NewConverter()
-	hocrResult, err := converter.ConvertToHOCR(gcvResponse)
-	if err != nil {
-		return "", fmt.Errorf("failed to convert to hOCR: %w", err)
-	}
-
-	return hocrResult, nil
+	// Use the simplified OCR service that bundles word detection + ChatGPT transcription
+	return h.ocrService.ProcessImageToHOCR(imagePath)
 }
 
 func (h *Handler) HandleStatic(w http.ResponseWriter, r *http.Request) {
@@ -721,12 +704,12 @@ func (h *Handler) createSessionFromDrupalNode(nid string) (string, error) {
 	var sessionErr error
 
 	if strings.Contains(hocrFile.URI, "gcloud") {
-		// Download and use existing hOCR instead of calling Google Cloud Vision
+		// Download and use existing hOCR instead of generating new hOCR
 		slog.Info("Using existing hOCR from Drupal", "nid", nid, "hocr_uri", hocrFile.URI)
 		sessionID, sessionErr = h.createSessionFromDrupalWithExistingHOCR(imageURL, hocrFile.ViewNode+hocrFile.URI, nid)
 	} else {
-		// Generate new hOCR using Google Cloud Vision API (same as normal image upload)
-		slog.Info("Generating new hOCR via Google Cloud Vision", "nid", nid, "hocr_uri", hocrFile.URI)
+		// Generate new hOCR using Tesseract + ChatGPT (same as normal image upload)
+		slog.Info("Generating new hOCR via Tesseract + ChatGPT", "nid", nid, "hocr_uri", hocrFile.URI)
 		sessionID, sessionErr = h.createSessionFromDrupalWithNewHOCR(imageURL, nid)
 	}
 
@@ -887,7 +870,7 @@ func (h *Handler) createSessionFromDrupalWithExistingHOCR(imageURL, hocrURL, nid
 	return sessionID, nil
 }
 
-// createSessionFromDrupalWithNewHOCR creates a session and generates new hOCR via Google Cloud Vision
+// createSessionFromDrupalWithNewHOCR creates a session and generates new hOCR via Tesseract + ChatGPT
 func (h *Handler) createSessionFromDrupalWithNewHOCR(imageURL, nid string) (string, error) {
 	// Download image from URL (similar to createSessionFromURL)
 	resp, err := http.Get(imageURL)
@@ -972,7 +955,7 @@ func (h *Handler) createSessionFromDrupalWithNewHOCR(imageURL, nid string) (stri
 	// Get image dimensions
 	width, height := utils.GetImageDimensions(imageFilePath)
 
-	// Process hOCR (check cache first, then generate via Google Cloud Vision)
+	// Process hOCR (check cache first, then generate via Tesseract + ChatGPT)
 	var hocrXML string
 	if _, err := os.Stat(hocrFilePath); err == nil {
 		hocrData, err := os.ReadFile(hocrFilePath)
@@ -990,7 +973,7 @@ func (h *Handler) createSessionFromDrupalWithNewHOCR(imageURL, nid string) (stri
 			slog.Info("Using cached hOCR", "filename", hocrFilename)
 		}
 	} else {
-		slog.Info("Generating new hOCR via Google Cloud Vision", "filename", imageFilename)
+		slog.Info("Generating new hOCR via Tesseract + ChatGPT", "filename", imageFilename)
 		hocrXML, err = h.getOCRForImage(imageFilePath)
 		if err != nil {
 			return "", fmt.Errorf("failed to process image with OCR: %w", err)
@@ -1010,8 +993,8 @@ func (h *Handler) createSessionFromDrupalWithNewHOCR(imageURL, nid string) (stri
 		Current:   0,
 		CreatedAt: time.Now(),
 		Config: models.EvalConfig{
-			Model:       "google_cloud_vision",
-			Prompt:      "Google Cloud Vision OCR with hOCR conversion for Drupal",
+			Model:       "tesseract_with_chatgpt",
+			Prompt:      "Tesseract + ChatGPT OCR with hOCR conversion for Drupal",
 			Temperature: 0.0,
 			Timestamp:   time.Now().Format("2006-01-02_15-04-05"),
 		},

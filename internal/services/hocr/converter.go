@@ -20,12 +20,12 @@ func NewConverter() *Converter {
 	}
 }
 
-func (h *Converter) ConvertToHOCRLines(gcvResponse models.GCVResponse) ([]models.HOCRLine, error) {
-	if len(gcvResponse.Responses) == 0 {
-		return nil, fmt.Errorf("no responses found in GCV data")
+func (h *Converter) ConvertToHOCRLines(ocrResponse models.OCRResponse) ([]models.HOCRLine, error) {
+	if len(ocrResponse.Responses) == 0 {
+		return nil, fmt.Errorf("no responses found in OCR data")
 	}
 
-	response := gcvResponse.Responses[0]
+	response := ocrResponse.Responses[0]
 	if response.FullTextAnnotation == nil {
 		return nil, fmt.Errorf("no full text annotation found")
 	}
@@ -50,7 +50,7 @@ func (h *Converter) ConvertHOCRLinesToXML(lines []models.HOCRLine, pageWidth, pa
 	hocr.WriteString("<head>\n")
 	hocr.WriteString("<title></title>\n")
 	hocr.WriteString("<meta http-equiv=\"Content-Type\" content=\"text/html; charset=utf-8\" />\n")
-	hocr.WriteString("<meta name='ocr-system' content='google-cloud-vision' />\n")
+	hocr.WriteString("<meta name='ocr-system' content='custom-word-detection-with-chatgpt' />\n")
 	hocr.WriteString("<meta name='ocr-capabilities' content='ocr_page ocr_carea ocr_par ocr_line ocrx_word' />\n")
 	hocr.WriteString("</head>\n")
 	hocr.WriteString("<body>\n")
@@ -93,17 +93,17 @@ func (h *Converter) convertHOCRWordToXML(word models.HOCRWord) string {
 		word.ID, title, html.EscapeString(word.Text))
 }
 
-func (h *Converter) ConvertToHOCR(gcvResponse models.GCVResponse) (string, error) {
-	lines, err := h.ConvertToHOCRLines(gcvResponse)
+func (h *Converter) ConvertToHOCR(ocrResponse models.OCRResponse) (string, error) {
+	lines, err := h.ConvertToHOCRLines(ocrResponse)
 	if err != nil {
 		return "", err
 	}
 
-	if len(gcvResponse.Responses) == 0 || gcvResponse.Responses[0].FullTextAnnotation == nil || len(gcvResponse.Responses[0].FullTextAnnotation.Pages) == 0 {
+	if len(ocrResponse.Responses) == 0 || ocrResponse.Responses[0].FullTextAnnotation == nil || len(ocrResponse.Responses[0].FullTextAnnotation.Pages) == 0 {
 		return "", fmt.Errorf("no page data found")
 	}
 
-	page := gcvResponse.Responses[0].FullTextAnnotation.Pages[0]
+	page := ocrResponse.Responses[0].FullTextAnnotation.Pages[0]
 	return h.ConvertHOCRLinesToXML(lines, page.Width, page.Height), nil
 }
 
@@ -135,28 +135,20 @@ func (h *Converter) convertParagraphToLines(paragraph models.Paragraph) []models
 	wordsGroups := h.groupWordsIntoLines(paragraph.Words)
 	var lines []models.HOCRLine
 
-	for _, wordsGroup := range wordsGroups {
-		if len(wordsGroup) == 0 {
-			continue
-		}
-
+	for _, ocrWord := range paragraph.Words {
 		lineID := fmt.Sprintf("line_%d", h.lineCounter)
-		lineBBox := h.calculateLineBBoxStruct(wordsGroup)
+		h.lineCounter++
 
-		var hocrWords []models.HOCRWord
-		for _, gcvWord := range wordsGroup {
-			hocrWord := h.convertGCVWordToHOCRWord(gcvWord, lineID)
-			hocrWords = append(hocrWords, hocrWord)
-		}
+		hocrWord := h.convertOCRWordToHOCRWord(ocrWord, lineID)
+		lineBBox := hocrWord.BBox
 
 		line := models.HOCRLine{
 			ID:    lineID,
 			BBox:  lineBBox,
-			Words: hocrWords,
+			Words: []models.HOCRWord{hocrWord},
 		}
 
 		lines = append(lines, line)
-		h.lineCounter++
 	}
 
 	return lines
@@ -226,17 +218,17 @@ func (h *Converter) calculateLineBBoxStruct(words []models.Word) models.BBox {
 	return models.BBox{X1: minX, Y1: minY, X2: maxX, Y2: maxY}
 }
 
-func (h *Converter) convertGCVWordToHOCRWord(gcvWord models.Word, lineID string) models.HOCRWord {
+func (h *Converter) convertOCRWordToHOCRWord(ocrWord models.Word, lineID string) models.HOCRWord {
 	var text strings.Builder
-	for _, symbol := range gcvWord.Symbols {
+	for _, symbol := range ocrWord.Symbols {
 		text.WriteString(symbol.Text)
 	}
 
-	bbox := h.boundingPolyToBBoxStruct(gcvWord.BoundingBox)
+	bbox := h.boundingPolyToBBoxStruct(ocrWord.BoundingBox)
 
 	confidence := 95.0
-	if gcvWord.Property != nil && len(gcvWord.Property.DetectedLanguages) > 0 {
-		confidence = gcvWord.Property.DetectedLanguages[0].Confidence * 100
+	if ocrWord.Property != nil && len(ocrWord.Property.DetectedLanguages) > 0 {
+		confidence = ocrWord.Property.DetectedLanguages[0].Confidence * 100
 	}
 
 	wordID := fmt.Sprintf("word_%d", h.wordCounter)
