@@ -98,6 +98,8 @@ const (
 	AnnotationExportFormat_ANNOTATION_EXPORT_FORMAT_HOCR        AnnotationExportFormat = 2
 	AnnotationExportFormat_ANNOTATION_EXPORT_FORMAT_PAGE_XML    AnnotationExportFormat = 3
 	AnnotationExportFormat_ANNOTATION_EXPORT_FORMAT_ALTO_XML    AnnotationExportFormat = 4
+	// Searchable image PDF, available through ItemService.PrepareItemExport.
+	AnnotationExportFormat_ANNOTATION_EXPORT_FORMAT_PDF AnnotationExportFormat = 5
 )
 
 // Enum value maps for AnnotationExportFormat.
@@ -108,6 +110,7 @@ var (
 		2: "ANNOTATION_EXPORT_FORMAT_HOCR",
 		3: "ANNOTATION_EXPORT_FORMAT_PAGE_XML",
 		4: "ANNOTATION_EXPORT_FORMAT_ALTO_XML",
+		5: "ANNOTATION_EXPORT_FORMAT_PDF",
 	}
 	AnnotationExportFormat_value = map[string]int32{
 		"ANNOTATION_EXPORT_FORMAT_UNSPECIFIED": 0,
@@ -115,6 +118,7 @@ var (
 		"ANNOTATION_EXPORT_FORMAT_HOCR":        2,
 		"ANNOTATION_EXPORT_FORMAT_PAGE_XML":    3,
 		"ANNOTATION_EXPORT_FORMAT_ALTO_XML":    4,
+		"ANNOTATION_EXPORT_FORMAT_PDF":         5,
 	}
 )
 
@@ -1671,14 +1675,13 @@ const file_scribe_v1_annotation_proto_rawDesc = "" +
 	"\x17selected_annotation_ids\x18\x03 \x03(\tB\x10\xbaH\r\xc8\x01\x01\x92\x01\a\b\x02\x10\x90N\x18\x01R\x15selectedAnnotationIds:\xc2\x02\xbaH\xbe\x02\x1a\xbb\x02\n" +
 	"\x1ejoin_words_into_line.selection\x12ditem_image_id, annotation_page_json, and at least two non-empty selected_annotation_ids are required\x1a\xb2\x01this.item_image_id > 0u && this.annotation_page_json.matches('.*\\\\S.*') && this.selected_annotation_ids.size() >= 2 && this.selected_annotation_ids.all(id, id.matches('.*\\\\S.*'))\"M\n" +
 	"\x19JoinWordsIntoLineResponse\x120\n" +
-	"\x14annotation_page_json\x18\x01 \x01(\tR\x12annotationPageJson\"\x82\x03\n" +
+	"\x14annotation_page_json\x18\x01 \x01(\tR\x12annotationPageJson\"\x84\x03\n" +
 	"\x1bExportAnnotationPageRequest\x12.\n" +
 	"\ritem_image_id\x18\x01 \x01(\x04B\n" +
 	"\xbaH\a\xc8\x01\x012\x02 \x00R\vitemImageId\x127\n" +
 	"\x11expected_revision\x18\x02 \x01(\x04B\n" +
-	"\xbaH\a\xc8\x01\x012\x02 \x00R\x10expectedRevision\x12H\n" +
-	"\x06format\x18\x03 \x01(\x0e2!.scribe.v1.AnnotationExportFormatB\r\xbaH\n" +
-	"\xc8\x01\x01\x82\x01\x04\x10\x01 \x00R\x06format:\xaf\x01\xbaH\xab\x01\x1a\xa8\x01\n" +
+	"\xbaH\a\xc8\x01\x012\x02 \x00R\x10expectedRevision\x12J\n" +
+	"\x06format\x18\x03 \x01(\x0e2!.scribe.v1.AnnotationExportFormatB\x0f\xbaH\f\xc8\x01\x01\x82\x01\x06\x10\x01 \x00 \x05R\x06format:\xaf\x01\xbaH\xab\x01\x1a\xa8\x01\n" +
 	"\x1fexport_annotation_page.required\x129item_image_id, expected_revision, and format are required\x1aJthis.item_image_id > 0u && this.expected_revision > 0u && this.format != 0\"\xb3\x01\n" +
 	"\x1cExportAnnotationPageResponse\x12\"\n" +
 	"\ritem_image_id\x18\x01 \x01(\x04R\vitemImageId\x12\x1a\n" +
@@ -1695,13 +1698,14 @@ const file_scribe_v1_annotation_proto_rawDesc = "" +
 	" ANNOTATION_GRANULARITY_PARAGRAPH\x10\x04\x12\x1f\n" +
 	"\x1bANNOTATION_GRANULARITY_LINE\x10\x05\x12\x1f\n" +
 	"\x1bANNOTATION_GRANULARITY_WORD\x10\x06\x12 \n" +
-	"\x1cANNOTATION_GRANULARITY_GLYPH\x10\a*\xdc\x01\n" +
+	"\x1cANNOTATION_GRANULARITY_GLYPH\x10\a*\xfe\x01\n" +
 	"\x16AnnotationExportFormat\x12(\n" +
 	"$ANNOTATION_EXPORT_FORMAT_UNSPECIFIED\x10\x00\x12'\n" +
 	"#ANNOTATION_EXPORT_FORMAT_PLAIN_TEXT\x10\x01\x12!\n" +
 	"\x1dANNOTATION_EXPORT_FORMAT_HOCR\x10\x02\x12%\n" +
 	"!ANNOTATION_EXPORT_FORMAT_PAGE_XML\x10\x03\x12%\n" +
-	"!ANNOTATION_EXPORT_FORMAT_ALTO_XML\x10\x042\xc5\v\n" +
+	"!ANNOTATION_EXPORT_FORMAT_ALTO_XML\x10\x04\x12 \n" +
+	"\x1cANNOTATION_EXPORT_FORMAT_PDF\x10\x052\xc5\v\n" +
 	"\x11AnnotationService\x12w\n" +
 	"\x11GetAnnotationPage\x12#.scribe.v1.GetAnnotationPageRequest\x1a$.scribe.v1.GetAnnotationPageResponse\"\x17\x92\xb5\x18\x13\x10\x04\x18\x01\"\ritem_image_id\x12z\n" +
 	"\x12SaveAnnotationPage\x12$.scribe.v1.SaveAnnotationPageRequest\x1a%.scribe.v1.SaveAnnotationPageResponse\"\x17\x92\xb5\x18\x13\x10\x04\x18\x02\"\ritem_image_id\x12w\n" +

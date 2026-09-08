@@ -1,0 +1,18 @@
+# Runtime PDF converter. Only reviewed binary wheels for Python 3.14 on Alpine.
+charset-normalizer==3.5.1 \
+    --hash=sha256:01e93745f7f219b703b60ba7afead36cfc4242782be5af484673fc500df12da5 \
+    --hash=sha256:6df0ec430f9a831772c23ca5a224cba36517a58a84bb32c32bb59a9fa67c47f6 \
+    --hash=sha256:9ac4444d8d4fd4c4bd08bf451ed3167aa9e7ec6cdb41b648794f1d1103652e36
+hocr-tools-lib==1.2.0 \
+    --hash=sha256:3b968747384ab17cf9550a0d55e302816605792c5d10563746b2314ccff24e71
+lxml==6.1.3 \
+    --hash=sha256:83e3a51e7933db700a0da0db31849db3a24022d9970da9bb73001e1d0326fd92 \
+    --hash=sha256:c59e4265608da6a041f54646ecc0c9ecdbb19aaf14c4c684bb6c2114998cc415
+pillow==12.3.0 \
+    --hash=sha256:23aceaa007d6172b02c277f0cd359c79492bbb14f7072b4ede9fbcaf20648130 \
+    --hash=sha256:fe3cca2e4e8a592be0f269a1ca4835c25199d9f3ce815c8491048f785b0a0198
+python-bidi==0.6.11 \
+    --hash=sha256:3bdb64ee0a74951465cd4a761e1029e73806ff43b2fe5be98643e52da5cabb66 \
+    --hash=sha256:60d9bf6c60c022657637f64897e63dc3f5b1c07cb7f0e1ead6150aff5150c5ab
+reportlab==5.0.1 \
+    --hash=sha256:1c36e6bb0e71780c72331eba60da7f602e8d4389a8723825af71342e49d791e8

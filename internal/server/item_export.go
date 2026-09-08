@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/lehigh-university-libraries/scribe/internal/store"
+	scribev1 "github.com/lehigh-university-libraries/scribe/proto/scribe/v1"
 )
 
 const (
@@ -277,9 +278,16 @@ func validExportDigest(value string) bool {
 	return err == nil && len(decoded) == sha256.Size
 }
 
+func itemExportFormatName(format scribev1.AnnotationExportFormat) (string, error) {
+	if format == scribev1.AnnotationExportFormat_ANNOTATION_EXPORT_FORMAT_PDF {
+		return "pdf", nil
+	}
+	return annotationExportFormatName(format)
+}
+
 func validAnnotationExportFormatName(format string) bool {
 	switch format {
-	case "txt", "hocr", "pagexml", "alto":
+	case "txt", "hocr", "pagexml", "alto", "pdf":
 		return true
 	default:
 		return false
@@ -288,6 +296,9 @@ func validAnnotationExportFormatName(format string) bool {
 
 func itemExportMetadata(item store.Item, format string) (string, string) {
 	safeName := sanitizeFilenamePart(item.Name, "item-"+item.ID)
+	if format == "pdf" {
+		return safeName + ".pdf", "application/pdf"
+	}
 	if len(item.Images) == 1 {
 		_, mediaType, extension, err := emptyAnnotationExportMetadata(format)
 		if err == nil {
@@ -317,6 +328,20 @@ func emptyAnnotationExportMetadata(format string) (string, string, string, error
 
 type canonicalExportPageRenderer func(canonicalExportPage, string) (string, string, string, error)
 
+func newItemExportFile() (*os.File, error) {
+	file, err := os.CreateTemp("", "scribe-item-export-")
+	if err != nil {
+		return nil, fmt.Errorf("%w: create file", errItemExportStaging)
+	}
+	// An open, unlinked file cannot leave transcription data after a crash.
+	if err := os.Remove(file.Name()); err != nil {
+		_ = file.Close()
+		_ = os.Remove(file.Name())
+		return nil, fmt.Errorf("%w: unlink file", errItemExportStaging)
+	}
+	return file, nil
+}
+
 func stageCanonicalItemExport(ctx context.Context, plan canonicalItemExportPlan) (*stagedCanonicalItemExport, func(), error) {
 	return stageCanonicalItemExportWithRenderer(ctx, plan, maxItemExportOutputBytes, renderCanonicalExportPage)
 }
@@ -328,20 +353,11 @@ func stageCanonicalItemExportWithRenderer(ctx context.Context, plan canonicalIte
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
 	}
-	file, err := os.CreateTemp("", "scribe-item-export-")
+	file, err := newItemExportFile()
 	if err != nil {
-		return nil, nil, fmt.Errorf("%w: create file: %v", errItemExportStaging, err)
+		return nil, nil, err
 	}
-	filename := file.Name()
 	cleanup := func() { _ = file.Close() }
-	// Unlink immediately while retaining the open descriptor. A normal return,
-	// cancellation, process crash, or SIGKILL can therefore never leave OCR
-	// plaintext in the container writable layer.
-	if err := os.Remove(filename); err != nil {
-		_ = file.Close()
-		_ = os.Remove(filename)
-		return nil, nil, fmt.Errorf("%w: unlink file: %v", errItemExportStaging, err)
-	}
 	bounded := &boundedExportWriter{destination: file, maximum: maximum}
 	var totalBytes int64
 	renderPage := func(page canonicalExportPage) (string, string, error) {

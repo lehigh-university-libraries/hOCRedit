@@ -2401,6 +2401,7 @@ components:
         - ANNOTATION_EXPORT_FORMAT_HOCR
         - ANNOTATION_EXPORT_FORMAT_PAGE_XML
         - ANNOTATION_EXPORT_FORMAT_ALTO_XML
+        - ANNOTATION_EXPORT_FORMAT_PDF
       description: |-
         AnnotationExportFormat selects a rebuildable view of one committed canonical
          AnnotationPage. Export operations never accept caller-supplied annotation
@@ -3131,6 +3132,7 @@ components:
           not:
             enum:
               - 0
+              - 5
           title: format
           $ref: '#/components/schemas/scribe.v1.AnnotationExportFormat'
       title: ExportAnnotationPageRequest

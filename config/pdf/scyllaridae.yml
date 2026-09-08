@@ -1,0 +1,6 @@
+forwardAuth: false
+allowedMimeTypes:
+  - application/x-tar
+cmdByMimeType:
+  default:
+    cmd: /app/scribe-pdf-export

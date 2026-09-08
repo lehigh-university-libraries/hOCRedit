@@ -44,6 +44,7 @@ run_contracts_group() {
 
 run_test_group() {
   run_make test-frontend
+  run_make pdf-export-smoke
   start_database
   SCRIBE_REQUIRE_TEST_DB=true run_make test-backend
   cleanup_database
@@ -84,6 +85,7 @@ run_all_groups() {
   # The full local contract reuses one isolated database for browser and Go
   # integration checks. Hosted jobs invoke the same two groups independently.
   run_make test-frontend
+  run_make pdf-export-smoke
   start_database
   SCRIBE_REQUIRE_BROWSER_BACKEND=true run_make test-browser
   SCRIBE_REQUIRE_TEST_DB=true run_make test-backend

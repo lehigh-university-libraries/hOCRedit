@@ -1,5 +1,6 @@
 # syntax=docker/dockerfile:1.25@sha256:0adf442eae370b6087e08edc7c50b552d80ddf261576f4ebd6421006b2461f12
 FROM golang:1.26.6-alpine@sha256:af8d6740070b8906d12eae1c3e3ea0957fb63f492051ea05e354c38ef9fe88df AS go-base
+FROM islandora/scyllaridae:6@sha256:573479dafa271f4071739408753c0ec2e8e59bd97b0f496a721e02a565d1948b AS scyllaridae
 
 # Repeated containerized tests reuse this prepared toolchain instead of
 # resolving Alpine packages for every test invocation. This stage is not a
@@ -25,7 +26,8 @@ RUN --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
     --mount=type=cache,target=/go/pkg/mod,sharing=locked \
     CGO_ENABLED=0 GOOS=linux go build -tags remoteocr -o /out/scribe-api ./cmd/api \
     && CGO_ENABLED=0 GOOS=linux go build -tags remoteocr -o /out/scribe-worker ./cmd/worker \
-    && CGO_ENABLED=0 GOOS=linux go build -tags remoteocr -o /out/scribe-browser-session ./cmd/browser-session
+    && CGO_ENABLED=0 GOOS=linux go build -tags remoteocr -o /out/scribe-browser-session ./cmd/browser-session \
+    && CGO_ENABLED=0 GOOS=linux go build -o /out/scribe-pdf-export ./cmd/pdf-export
 
 FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
 WORKDIR /app
@@ -33,11 +35,20 @@ RUN apk add --no-cache \
     ca-certificates=20260611-r0 \
     curl=8.22.0-r0 \
     jq=1.8.2-r0 \
-    openssl=3.5.8-r0
+    openssl=3.5.8-r0 \
+    python3=3.14.7-r1 \
+    py3-pip=26.1.2-r0 \
+    poppler-utils=25.12.0-r1
+COPY config/pdf/requirements.txt /app/pdf-requirements.txt
+RUN python3 -m venv /opt/pdf \
+    && /opt/pdf/bin/pip install --no-cache-dir --require-hashes --only-binary=:all: -r /app/pdf-requirements.txt
 RUN adduser -D -u 10001 appuser
 COPY --from=builder /out/scribe-api /app/scribe-api
 COPY --from=builder /out/scribe-worker /app/scribe-worker
 COPY --from=builder /out/scribe-browser-session /app/scribe-browser-session
+COPY --from=builder /out/scribe-pdf-export /app/scribe-pdf-export
+COPY --from=scyllaridae /app/scyllaridae /app/scyllaridae
+COPY config/pdf/scyllaridae.yml /app/scyllaridae.yml
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 COPY scripts/vault-init.sh /usr/local/bin/vault-init.sh
 COPY scripts/vault-retry.sh /usr/local/lib/scribe/vault-retry.sh

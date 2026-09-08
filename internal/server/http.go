@@ -64,6 +64,7 @@ type Handler struct {
 	itemPageTokens              *itemPageTokenCodec
 	itemExportTokens            *itemExportTokenCodec
 	exportLimiter               *bodyConcurrencyLimiter
+	pdfExportURL                string
 	imageRegionFetcher          func(context.Context, string, int, int, int, int) (string, func(), error)
 	deleteUploadBlob            func(context.Context, string) error
 	deleteTripletImageGraphFn   func(context.Context, uint64) error
@@ -216,6 +217,7 @@ func NewHandler(
 		itemPageTokens:         itemPageTokens,
 		itemExportTokens:       itemExportTokens,
 		exportLimiter:          newBodyConcurrencyLimiter(maxConcurrentExports, maxConcurrentExportsPerWorkspace),
+		pdfExportURL:           config.Get().Config.PDFExportURL,
 	}
 	if annotations != nil {
 		if err := annotations.SetStorageQuotaLimits(configuredStorageQuotaLimits()); err != nil {
@@ -1268,7 +1270,13 @@ func (h *Handler) handlePreparedItemExport(w http.ResponseWriter, r *http.Reques
 		}
 		return
 	}
-	staged, cleanup, err := stageCanonicalItemExport(ctx, plan)
+	var staged *stagedCanonicalItemExport
+	var cleanup func()
+	if plan.Format == "pdf" {
+		staged, cleanup, err = h.stagePDFItemExport(ctx, plan)
+	} else {
+		staged, cleanup, err = stageCanonicalItemExport(ctx, plan)
+	}
 	if err != nil {
 		switch {
 		case errors.Is(err, context.Canceled):

@@ -1,5 +1,6 @@
 listen_addr: ":8080"
 public_base_url: "${PUBLIC_BASE_URL:-http://localhost:8080}"
+pdf_export_url: "${PDF_EXPORT_URL:-http://pdf-export:8080}"
 
 server:
   trusted_proxy_cidrs: "${SERVER_TRUSTED_PROXY_CIDRS:-}"

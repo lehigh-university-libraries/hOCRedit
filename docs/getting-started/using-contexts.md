@@ -25,6 +25,10 @@ The selected context applies to the new processing request. Changing the
 workspace default later does not silently reprocess existing items or alter the
 context snapshot already attached to a queued attempt.
 
+While an image URL is processing, **Process URL** is disabled to prevent duplicate
+submissions. A successful request opens the editor; if processing fails, the form
+shows the error and enables the button so you can retry.
+
 ## Create a workspace context
 
 With workspace write access, open **Contexts**, then:

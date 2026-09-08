@@ -3,6 +3,9 @@
 Plain text, hOCR, PAGE XML, and ALTO XML are generated from a committed canonical
 AnnotationPage. They are views, not editable persistence stores.
 
+The Library groups the formats under each item's **Download** control. Open it
+to choose hOCR, PAGE XML, ALTO XML, plain text, or a searchable PDF.
+
 `AnnotationService.ExportAnnotationPage` requires both the tenant-scoped
 `item_image_id` and the exact committed `expected_revision`. It returns that
 revision with the media type, filename, and bytes. A stale revision fails with
@@ -30,6 +33,35 @@ page may emit at most 32 MiB, one item may read at most 64 MiB of canonical
 source and stage at most 128 MiB of derived output, generation has a 90-second
 work deadline plus a bounded response-write grace period, and prepared URLs
 expire after five minutes.
+
+## Searchable PDF
+
+`ANNOTATION_EXPORT_FORMAT_PDF` is supported by `ItemService.PrepareItemExport`,
+including for a single-image item. The page-only export RPC continues to serve
+the four text formats. PDF uses the same complete revision vector, signed URL,
+authorization, and stale-revision rejection as the other item exports.
+
+The API renders each committed page as hOCR, fetches its full JPEG through the
+existing bounded image path, verifies image dimensions, and sends ordered
+image/hOCR pairs to the server-configured Scyllaridae service. No image URLs,
+workspace credentials, or caller-supplied annotation data reach that service.
+The packaged `hocr-pdf` converter combines the existing text with the images;
+it does not run OCR again. `pdfinfo` must accept the output and confirm the
+page count before any PDF bytes are returned.
+
+A PDF request is limited to 1,000 pages, 250 million aggregate image pixels,
+128 MiB of image/hOCR input, and 128 MiB of output. The converter has an
+85-second deadline inside the API's 90-second export deadline. Images retain
+their pixel dimensions and use their JPEG resolution metadata, or 300 DPI when
+the metadata is absent. Downloads contain one PDF, including for multi-page
+items. See [PDF runtime operations](../operations/configuration.md#pdf-exports).
+
+`make pdf-export-smoke` calls the packaged Scyllaridae HTTP service with two
+colored images and corrected hOCR, checks Unicode text with `pdftotext`, and
+uses `pdfimages` to prove image bytes and page order survived. The synthetic
+images contain no text to recognize. The same test runs in the CI test group.
+
+## Text format validation
 
 Golden fixtures exercise the production renderer for each format. PAGE output
 conforms to the pinned PRImA PAGE Content 2019-07-15 schema, and ALTO output

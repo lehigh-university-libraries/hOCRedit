@@ -7,6 +7,8 @@ Required pull-request checks cover:
 - Go race tests, DB integration tests, release-target 32-bit cross-compilation,
   and web/plugin tests and builds;
 - real Chromium editor acceptance tests in a pinned Playwright container;
+- packaged Scyllaridae PDF conversion with corrected Unicode text and exact
+  image/page-order checks through Poppler;
 - OCR build tags and DB-backed ingest/revision acceptance tests;
 - isolated backup/restore integrity and expired-job recovery smoke tests;
 - gosec, reachable Go vulnerability analysis, npm audits, and Trivy dependency

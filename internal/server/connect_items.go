@@ -131,7 +131,7 @@ func (h *Handler) PrepareItemExport(ctx context.Context, req *connect.Request[sc
 	if h.itemExportTokens == nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("item export signer is not configured"))
 	}
-	format, err := annotationExportFormatName(req.Msg.GetFormat())
+	format, err := itemExportFormatName(req.Msg.GetFormat())
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}

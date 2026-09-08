@@ -236,6 +236,10 @@ export-schema-check: ## Validate PAGE and ALTO export fixtures against pinned of
 test-frontend: ## Run frontend tests and production build checks
 	@bash ./ci/test-frontend.sh
 
+.PHONY: pdf-export-smoke
+pdf-export-smoke: ## Verify the packaged Scyllaridae PDF service preserves corrected text and images
+	@bash ./ci/pdf-export-smoke.sh
+
 test-browser: ## Run real Chromium editor acceptance tests in the pinned Playwright container
 	@bash ./ci/test-browser.sh
 

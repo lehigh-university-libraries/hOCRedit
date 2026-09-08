@@ -73,6 +73,7 @@ export async function renderShell(app: HTMLElement, initialView: ShellView): Pro
   // bindLibraryActions would make the newly rendered Cancel button a no-op.
   let activeMultiUpload: AbortController | undefined;
   let activeSingleUpload: AbortController | undefined;
+  let processingImageURL = false;
   let drawerReturnFocus: HTMLElement | null = null;
   let modalReturnFocus: HTMLElement | null = null;
   let apiKeyDialogReturnFocus: HTMLElement | null = null;
@@ -556,7 +557,7 @@ export async function renderShell(app: HTMLElement, initialView: ShellView): Pro
         <div class="${card} mx-auto max-w-3xl">
           <div class="flex flex-wrap justify-center gap-2">${(["url", "single", "multi", "manifest"] as LibraryTab[]).map((tab) => html`<button data-library-tab="${tab}" class="${tab === state.activeLibraryTab ? primary : buttons}" type="button">${tab}</button>`)}</div>
           <div class="mt-5 flex flex-wrap items-center gap-3"><label for="library-context-select" class="text-sm">Context</label><select id="library-context-select" class="${input} max-w-xs"><option value="0">Default</option>${contextOptions(state.contexts)}</select></div>
-          <form id="library-form-url" class="${state.activeLibraryTab === "url" ? "mt-5 grid gap-3" : "hidden"}"><input id="library-image-url" aria-label="Image URL" type="url" required class="${input}" placeholder="https://example.org/image.jpg" /><button class="${primary}" type="submit">Process URL</button><p id="library-url-status" aria-live="polite" class="text-sm text-muted-foreground"></p></form>
+          <form id="library-form-url" class="${state.activeLibraryTab === "url" ? "mt-5 grid gap-3" : "hidden"}"><input id="library-image-url" aria-label="Image URL" type="url" required class="${input}" placeholder="https://example.org/image.jpg" /><button class="${primary}" type="submit"${processingImageURL ? " disabled" : ""}>${processingImageURL ? "Processing…" : "Process URL"}</button><p id="library-url-status" aria-live="polite" class="text-sm text-muted-foreground"></p></form>
           <form id="library-form-single" class="${state.activeLibraryTab === "single" ? "mt-5 grid gap-3" : "hidden"}"><input id="library-single-file" aria-label="Upload one image" type="file" class="${input}" /><button class="${primary}" type="submit">Upload and process</button><p id="library-single-status" aria-live="polite" class="text-sm text-muted-foreground"></p></form>
           <form id="library-form-multi" class="${state.activeLibraryTab === "multi" ? "mt-5 grid gap-3" : "hidden"}"><input id="library-multi-files" aria-label="Upload multiple images" type="file" multiple class="${input}" /><div class="flex gap-2"><button class="${primary}" type="submit">Upload or resume batch</button><button id="library-multi-cancel" class="${buttons}" type="button">Cancel</button></div><p id="library-multi-status" aria-live="polite" class="text-sm text-muted-foreground"></p></form>
           <form id="library-form-manifest" class="${state.activeLibraryTab === "manifest" ? "mt-5 grid gap-3" : "hidden"}"><input id="library-manifest-url" aria-label="IIIF manifest URL" type="url" required class="${input}" placeholder="https://example.org/manifest.json" /><label class="text-sm"><input type="radio" name="library-manifest-mode" value="import" checked /> Edit imported hOCR directly</label><label class="text-sm"><input type="radio" name="library-manifest-mode" value="reprocess" /> Reprocess imported pages</label><button class="${primary}" type="submit">Ingest manifest</button><p id="library-manifest-status" aria-live="polite" class="text-sm text-muted-foreground"></p></form>
@@ -580,9 +581,14 @@ export async function renderShell(app: HTMLElement, initialView: ShellView): Pro
     document.getElementById("library-load-more")?.addEventListener("click", () => void loadMoreItems());
     document.getElementById("library-form-url")?.addEventListener("submit", async (event) => {
       event.preventDefault();
+      if (processingImageURL) return;
       const status = document.getElementById("library-url-status") as HTMLParagraphElement;
       const imageUrl = (document.getElementById("library-image-url") as HTMLInputElement).value.trim();
       if (!imageUrl) return;
+      processingImageURL = true;
+      const button = document.querySelector<HTMLButtonElement>('#library-form-url button[type="submit"]')!;
+      button.disabled = true;
+      button.textContent = "Processing…";
       try {
         status.textContent = "Processing image and starting automatic transcription…";
         const result = await processImageURL(imageUrl, selectedContextId());
@@ -597,7 +603,17 @@ export async function renderShell(app: HTMLElement, initialView: ShellView): Pro
         }
         await refreshWorkspaceScopedData();
         renderAll();
-      } catch (error) { status.textContent = `Error: ${String(error)}`; }
+      } catch (error) {
+        const currentStatus = document.getElementById("library-url-status");
+        if (currentStatus) currentStatus.textContent = `Error: ${String(error)}`;
+      } finally {
+        processingImageURL = false;
+        const currentButton = document.querySelector<HTMLButtonElement>('#library-form-url button[type="submit"]');
+        if (currentButton) {
+          currentButton.disabled = false;
+          currentButton.textContent = "Process URL";
+        }
+      }
     });
     const submitSingleUpload = async () => {
       if (activeSingleUpload) return;

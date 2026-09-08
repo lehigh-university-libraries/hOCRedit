@@ -4,6 +4,10 @@
 development, while the package also produces distributable ESM and CommonJS
 artifacts.
 
+The editor gives action buttons most of the toolbar width. The keyboard shortcut
+key stays compact beside them, wraps below on narrow screens, and hides when
+the viewport is too short.
+
 Keep the plugin thin:
 
 - backend RPCs own canonical structural mutations;

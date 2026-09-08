@@ -127,7 +127,7 @@ describe('ScribeActionPanel', () => {
     });
     expect(shortcutLegendSx).toMatchObject({
       display: 'grid',
-      gridTemplateColumns: 'repeat(auto-fit, minmax(164px, 1fr))',
+      gridTemplateColumns: 'repeat(auto-fit, minmax(148px, 1fr))',
       width: '100%',
     });
     expect(actionPanelRootSx['@media (max-width: 480px), (max-height: 500px)']).toMatchObject({
@@ -145,9 +145,6 @@ describe('ScribeActionPanel', () => {
       display: 'none',
     });
     expect(shortcutLegendSx['@media (max-height: 500px)']).toEqual({ display: 'none' });
-    expect(shortcutLegendSx['@media (max-width: 480px)']).toMatchObject({
-      gridTemplateColumns: 'repeat(auto-fit, minmax(148px, 1fr))',
-    });
   });
 
   it('keeps granularity visible and exposes structural shortcuts on their controls', async () => {

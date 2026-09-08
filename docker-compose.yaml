@@ -19,6 +19,7 @@ x-scribe-app-env: &scribe-app-env
   SCRIBE_OTEL_EXPORTER: ${SCRIBE_OTEL_EXPORTER:-none}
   PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost}
   API_INTERNAL_BASE: ${API_INTERNAL_BASE:-http://api:8080}
+  PDF_EXPORT_URL: http://pdf-export:8080
   AUTH_PREVIEW_ANONYMOUS: ${AUTH_PREVIEW_ANONYMOUS:-false}
   VAULT_ADDRESS: ${VAULT_ADDRESS:-}
   VAULT_WORKSPACE: ${VAULT_WORKSPACE:-dev}
@@ -120,6 +121,9 @@ services:
     <<: *scribe-runtime-hardening
     image: *scribe-api-image
     build: .
+    networks:
+      - default
+      - pdf-export
     labels:
       org.libops.scribe.local-token-generation: ${SCRIBE_LOCAL_TOKEN_GENERATION:-initial}
     expose:
@@ -142,12 +146,43 @@ services:
         condition: service_healthy
       triplet:
         condition: service_healthy
+      pdf-export:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8080/readyz"]
       interval: 10s
       timeout: 3s
       retries: 12
       start_period: 20s
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+  pdf-export:
+    <<: *scribe-runtime-hardening
+    image: *scribe-api-image
+    build: .
+    entrypoint: ["/app/scyllaridae"]
+    environment:
+      SCYLLARIDAE_YML_PATH: /app/scyllaridae.yml
+      SCYLLARIDAE_PORT: "8080"
+      SCYLLARIDAE_LOG_LEVEL: ERROR
+      PYTHONDONTWRITEBYTECODE: "1"
+    networks:
+      - pdf-export
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=1g,mode=1777
+    mem_limit: 1g
+    cpus: 2
+    pids_limit: 64
+    ulimits:
+      fsize:
+        soft: 134217728
+        hard: 134217728
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8080/healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
     restart: unless-stopped
     stop_grace_period: 30s
 
@@ -251,6 +286,11 @@ services:
       - /bin/sh
       - /usr/local/bin/vault-init.sh
     restart: "no"
+
+networks:
+  default: {}
+  pdf-export:
+    internal: true
 
 volumes:
   mariadb-data:

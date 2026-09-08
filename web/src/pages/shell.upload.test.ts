@@ -206,6 +206,14 @@ describe("annotation upload actions", () => {
     } as never);
 
     expect(document.querySelector('a[href*="/v1/items/"][href*="export"]')).toBeNull();
+    const download = document.querySelector<HTMLDetailsElement>('#shell-content details[name="item-download"]')!;
+    expect(download.open).toBe(false);
+    expect(download.querySelector('summary')?.textContent).toContain("Download");
+    download.querySelector('summary')!.click();
+    expect(download.open).toBe(true);
+    expect(Array.from(download.querySelectorAll('[data-item-export]'), (button) => button.textContent)).toEqual([
+      "hOCR", "PAGE XML", "ALTO XML", "Text", "PDF",
+    ]);
     const pageExport = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-item-export="item-export"]'))
       .find((button) => button.dataset.itemExportFormat === `${AnnotationExportFormat.PAGE_XML}`);
     expect(pageExport).toBeTruthy();
@@ -452,6 +460,45 @@ describe("annotation upload actions", () => {
       expect(params.get("itemId")).toBe("url-item");
       expect(params.get("jobId")).toBe("501");
       expect(params.has("autoTranscribe")).toBe(false);
+    });
+  });
+
+  it("blocks duplicate URL submissions across refreshes and allows retry after failure", async () => {
+    await setupShell();
+    let rejectProcessing!: (error: Error) => void;
+    vi.mocked(processImageURL).mockImplementationOnce(() => new Promise((_resolve, reject) => {
+      rejectProcessing = reject;
+    }));
+    const form = document.getElementById("library-form-url") as HTMLFormElement;
+    const button = form.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+    (document.getElementById("library-image-url") as HTMLInputElement).value = "https://example.test/page.jpg";
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    button.click();
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    expect(button.disabled).toBe(true);
+    expect(button.textContent).toBe("Processing…");
+    expect(processImageURL).toHaveBeenCalledOnce();
+
+    document.getElementById("library-refresh")?.click();
+    await waitFor(() => expect(document.getElementById("library-form-url")).not.toBe(form));
+    const refreshedForm = document.getElementById("library-form-url") as HTMLFormElement;
+    const refreshedButton = refreshedForm.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+    (document.getElementById("library-image-url") as HTMLInputElement).value = "https://example.test/page.jpg";
+    expect(refreshedButton.disabled).toBe(true);
+    refreshedForm.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    expect(processImageURL).toHaveBeenCalledOnce();
+
+    rejectProcessing(new Error("processing unavailable"));
+    await waitFor(() => {
+      expect(refreshedButton.disabled).toBe(false);
+      expect(refreshedButton.textContent).toBe("Process URL");
+      expect(document.getElementById("library-url-status")?.textContent).toContain("processing unavailable");
+    });
+    vi.mocked(processImageURL).mockResolvedValueOnce({ itemId: "url-item", itemImageId: 101n, transcriptionJobId: 501n } as never);
+    refreshedButton.click();
+    await waitFor(() => {
+      expect(processImageURL).toHaveBeenCalledTimes(2);
+      expect(window.location.href).toContain("/editor?itemImageId=101");
     });
   });
 

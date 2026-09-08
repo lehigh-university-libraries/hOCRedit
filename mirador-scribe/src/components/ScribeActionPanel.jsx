@@ -71,22 +71,19 @@ export const actionPanelToolbarLayoutSx = {
 };
 
 export const shortcutLegendSx = {
-  alignSelf: 'stretch',
+  alignSelf: 'flex-start',
   display: 'grid',
-  flex: '1 1 280px',
-  gap: 0.75,
-  gridTemplateColumns: 'repeat(auto-fit, minmax(164px, 1fr))',
+  flex: '0 1 320px',
+  gap: 0.5,
+  gridTemplateColumns: 'repeat(auto-fit, minmax(148px, 1fr))',
   listStyle: 'none',
   m: 0,
-  maxWidth: 560,
+  maxWidth: 320,
   minWidth: 0,
   p: 0,
   width: '100%',
   '@media (max-height: 500px)': {
     display: 'none',
-  },
-  '@media (max-width: 480px)': {
-    gridTemplateColumns: 'repeat(auto-fit, minmax(148px, 1fr))',
   },
 };
 
@@ -396,7 +393,7 @@ export default function ScribeActionPanel({
               display: 'flex',
               flex: '1 1 480px',
               flexDirection: 'column',
-              maxWidth: 680,
+              maxWidth: 960,
               minWidth: 0,
               p: 1,
               width: '100%',

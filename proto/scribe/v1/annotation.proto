@@ -305,6 +305,8 @@ enum AnnotationExportFormat {
   ANNOTATION_EXPORT_FORMAT_HOCR = 2;
   ANNOTATION_EXPORT_FORMAT_PAGE_XML = 3;
   ANNOTATION_EXPORT_FORMAT_ALTO_XML = 4;
+  // Searchable image PDF, available through ItemService.PrepareItemExport.
+  ANNOTATION_EXPORT_FORMAT_PDF = 5;
 }
 
 message ExportAnnotationPageRequest {
@@ -327,7 +329,7 @@ message ExportAnnotationPageRequest {
     (buf.validate.field).required = true,
     (buf.validate.field).enum = {
       defined_only: true
-      not_in: 0
+      not_in: [0, 5]
     }
   ];
 }

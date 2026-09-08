@@ -81,6 +81,7 @@ var proxyHostnameLabelPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]*[a-z0-
 type Config struct {
 	ListenAddr    string `yaml:"listen_addr"`
 	PublicBaseURL string `yaml:"public_base_url"`
+	PDFExportURL  string `yaml:"pdf_export_url"`
 
 	Server        ServerConfig          `yaml:"server"`
 	Auth          AuthConfig            `yaml:"auth"`
@@ -914,6 +915,7 @@ func validateServiceEndpoints(cfg Config) error {
 		{name: "llm.ollama", url: cfg.LLM.Ollama.URL, audience: cfg.LLM.Ollama.Audience},
 		{name: "llm.kraken", url: cfg.LLM.Kraken.URL, audience: cfg.LLM.Kraken.Audience},
 		{name: "segmentation_service", url: cfg.Segmentation.URL, audience: cfg.Segmentation.Audience},
+		{name: "pdf_export_url", url: cfg.PDFExportURL},
 	}
 	for _, endpoint := range endpoints {
 		if err := validateServiceEndpoint(endpoint.name, endpoint.url, endpoint.audience); err != nil {

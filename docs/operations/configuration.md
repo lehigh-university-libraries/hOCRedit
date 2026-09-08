@@ -6,6 +6,33 @@ values. Secret material comes from Vault or Compose secret files and must not be
 placed in committed `.env` files, YAML, checked-in Terraform values, build
 arguments, or image layers.
 
+## PDF exports
+
+The Compose `pdf-export` service runs Scyllaridae and the PDF command from the
+same reviewed image digest as the API. It has no published port, credentials,
+or persistent volumes. Only the API joins its internal network; the converter
+cannot fetch images from the internet. The API's server-owned `pdf_export_url`
+configuration defaults to `http://pdf-export:8080` (`PDF_EXPORT_URL` outside
+Compose). It is never workspace input.
+
+The runtime uses hash-locked `hocr-tools-lib` wheels from
+`config/pdf/requirements.txt` and pinned Poppler tools. The command and all
+repository integration remain Go/Bash. When updating the converter, review its
+complete wheel hashes for both supported Alpine architectures and run
+`make pdf-export-smoke`; accepting a PDF is insufficient without verifying
+corrected Unicode text and the original images.
+
+Temporary files live on a 1 GiB tmpfs. The service has a 1 GiB memory limit,
+two CPUs, a 64-process limit, and a 128 MiB file-size limit. Successful and failed
+commands remove their working directories; subsequent requests remove only
+abandoned `scribe-pdf-*` directories older than two minutes, beyond the
+85-second command deadline. Converter diagnostics and document text are not
+included in logs. If exports fail, check `docker compose ps pdf-export` and
+the service health check, then run `make pdf-export-smoke` against the reviewed
+source before changing packages or resource limits.
+
+## Application defaults
+
 Runtime quota, storage, and IIIF-limit defaults are authored only in that
 application config. Local Compose passes empty overrides so the application
 selects them. Terraform decodes the same file, applies an explicitly supplied

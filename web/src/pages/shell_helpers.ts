@@ -71,6 +71,7 @@ export const itemExportFormats = [
   { format: AnnotationExportFormat.PAGE_XML, label: "PAGE XML" },
   { format: AnnotationExportFormat.ALTO_XML, label: "ALTO XML" },
   { format: AnnotationExportFormat.PLAIN_TEXT, label: "Text" },
+  { format: AnnotationExportFormat.PDF, label: "PDF" },
 ] as const;
 
 export interface ItemExportActionState {
@@ -94,7 +95,14 @@ export function renderItemActions(item: ItemSummary, exportState?: ItemExportAct
     <div class="mt-4 flex flex-wrap items-center gap-2">
       ${openHref ? html`<a href="${openHref}" class="${primary}">Open editor</a>` : html`<span class="rounded-md border px-3 py-2 text-xs text-muted-foreground">No images</span>`}
       <button data-item-logs="${item.id}" class="${buttons}" type="button">Logs</button>
-      ${openHref ? itemExportFormats.map(({ format, label }) => html`<button data-item-export="${item.id}" data-item-export-format="${format}" class="${buttons}" type="button"${exportBusy || deleteBusy ? " disabled" : ""}${exportState?.busyFormat === format ? ' aria-busy="true"' : ""}>${exportState?.busyFormat === format ? "Preparing…" : label}</button>`) : ""}
+      ${openHref ? html`
+        <details class="relative" name="item-download">
+          <summary class="${buttons} cursor-pointer list-none" aria-busy="${exportBusy ? "true" : "false"}">${exportBusy ? "Preparing…" : "Download ▾"}</summary>
+          <div class="absolute left-0 top-full z-30 mt-1 grid min-w-40 gap-1 rounded-md border border-border bg-card p-1 shadow-lg">
+            ${itemExportFormats.map(({ format, label }) => html`<button data-item-export="${item.id}" data-item-export-format="${format}" class="${buttons} justify-start" type="button"${exportBusy || deleteBusy ? " disabled" : ""}${exportState?.busyFormat === format ? ' aria-busy="true"' : ""}>${exportState?.busyFormat === format ? "Preparing…" : label}</button>`)}
+          </div>
+        </details>
+      ` : ""}
       <button data-item-delete="${item.id}" aria-label="Delete item ${item.name?.trim() || item.id}" aria-busy="${deleteBusy ? "true" : "false"}" class="${destructive}" type="button"${exportBusy || deleteBusy ? " disabled" : ""}>
         <svg aria-hidden="true" focusable="false" class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M3 6h18M8 6V4h8v2m3 0-1 14H6L5 6m4 4v6m6-6v6"></path>

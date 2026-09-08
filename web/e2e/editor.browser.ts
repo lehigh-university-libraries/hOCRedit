@@ -384,6 +384,14 @@ test("production Scribe viewer options keep the full bottom pane usable at every
 
     const panel = page.locator('[data-scribe-action-panel="true"]');
     await expect(panel).toBeVisible();
+    if (viewport.width >= 1024) {
+      const legendWidth = await panel.getByRole("list", { name: "Keyboard shortcuts" })
+        .evaluate((element) => element.getBoundingClientRect().width);
+      const actionsWidth = await panel.getByRole("group", { name: "Text and page actions" })
+        .evaluate((element) => element.getBoundingClientRect().width);
+      expect(legendWidth).toBeLessThanOrEqual(320);
+      expect(legendWidth).toBeLessThan(actionsWidth / 2);
+    }
     const metrics = await panel.evaluate((element) => {
       const rect = element.getBoundingClientRect();
       const parentRect = element.parentElement?.getBoundingClientRect();
