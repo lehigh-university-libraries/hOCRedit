@@ -89,7 +89,7 @@ run_publisher() {
     DOCKER_OBSERVATIONS="${root}/docker-observations" \
     BACKEND_TAG="ghcr.io/lehigh-university-libraries/scribe:pr-75" \
     FRONTEND_TAG="ghcr.io/lehigh-university-libraries/scribe-frontend:pr-75" \
-    SKOPEO_IMAGE="quay.io/skopeo/stable:v1.22.2@sha256:8d25aabcf965e267b6a6ad02ff8da5512f77de1490063625093ff564797e88bc" \
+    SKOPEO_IMAGE="quay.io/skopeo/stable:v1.22.2@sha256:db4108427c05acbadd1447316caa9b5f097a9a737d897d2297443baedff37ded" \
     "$@" \
     "$publisher"
 }
