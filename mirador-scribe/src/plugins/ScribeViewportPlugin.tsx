@@ -6,6 +6,7 @@ import {
   imagePointToViewerElement,
   initialLineBBoxForViewport,
   viewerElementPointToImage,
+  viewportOffsetToReveal,
 } from '../editor/geometry';
 import { canvasIdForWindow } from '../utils/iiif';
 import type { ImageBBox, MiradorState, Point2D } from '../types/scribe';
@@ -25,6 +26,7 @@ interface ViewportEventDetail {
   active?: boolean;
   bbox?: ImageBBox | null;
   canvasId: string;
+  ensureVisible?: boolean;
   windowId: string;
 }
 
@@ -82,6 +84,27 @@ function fitViewportToBBox(
   viewer.viewport.fitBoundsWithConstraints(nextBounds, true);
 }
 
+/**
+ * Pans by the smallest offset that brings a box fully into view without
+ * changing zoom. Used by the transcript pane so stepping through rows never
+ * re-frames a line the reader can already see.
+ */
+function revealBBox(
+  viewer: OpenSeadragon.Viewer | null | undefined,
+  bbox: ImageBBox | null | undefined,
+): void {
+  if (!viewer?.viewport || !viewer.world?.getItemCount() || !bbox) return;
+  const tiledImage = viewer.world.getItemAt(0);
+  const bounds = currentImageBounds(viewer);
+  if (!tiledImage?.imageToViewportCoordinates || !bounds) return;
+  const offset = viewportOffsetToReveal(bbox, bounds, Math.max(8, bbox.h * 0.5));
+  if (!offset) return;
+  const origin = tiledImage.imageToViewportCoordinates(0, 0);
+  const shifted = tiledImage.imageToViewportCoordinates(offset.x, offset.y);
+  viewer.viewport.panBy(new OpenSeadragon.Point(shifted.x - origin.x, shifted.y - origin.y), false);
+  viewer.viewport.applyConstraints(false);
+}
+
 function snapViewportToBBox(
   viewer: OpenSeadragon.Viewer | null | undefined,
   bbox: ImageBBox | null | undefined,
@@ -112,9 +135,13 @@ function ScribeViewportPlugin({ canvasId, viewer, windowId }: ScribeViewportProp
     }));
   });
 
-  const focusAnnotation = useEffectEvent((bbox: ImageBBox | null) => {
+  const focusAnnotation = useEffectEvent((bbox: ImageBBox | null, ensureVisible = false) => {
     if (!viewer?.viewport || !viewer.world?.getItemCount() || !bbox) return;
     focusedBBoxRef.current = bbox;
+    if (ensureVisible) {
+      revealBBox(viewer, bbox);
+      return;
+    }
     fitViewportToBBox(viewer, bbox, FOCUS_BBOX_VIEWPORT_RATIO, FOCUS_BBOX_WIDTH_RATIO);
   });
 
@@ -146,7 +173,7 @@ function ScribeViewportPlugin({ canvasId, viewer, windowId }: ScribeViewportProp
     const handleFocus = (event: Event) => {
       const detail = eventDetail(event);
       if (detail?.windowId !== windowId || detail.canvasId !== canvasId) return;
-      focusAnnotation(detail.bbox || null);
+      focusAnnotation(detail.bbox || null, Boolean(detail.ensureVisible));
     };
     document.addEventListener('scribe:focus-annotation', handleFocus);
     return () => document.removeEventListener('scribe:focus-annotation', handleFocus);

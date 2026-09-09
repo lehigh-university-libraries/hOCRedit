@@ -176,3 +176,89 @@ export function initialLineBBoxForViewport(
     y: top + ((visibleHeight - Math.min(visibleHeight, height)) / 2),
   });
 }
+
+export type BBoxHandle = 'nw' | 'ne' | 'sw' | 'se';
+
+/**
+ * Applies a corner-handle drag to a box. The opposite corner stays anchored,
+ * so dragging "se" grows the box and dragging "nw" moves its origin.
+ */
+export function resizeBBoxFromHandle(
+  bbox: ImageBBox,
+  handle: BBoxHandle,
+  dx: number,
+  dy: number,
+): ImageBBox {
+  let { x, y, w, h } = normalizeImageBBox(bbox);
+  if (handle.startsWith('n')) { y += dy; h -= dy; }
+  if (handle.startsWith('s')) { h += dy; }
+  if (handle.endsWith('w')) { x += dx; w -= dx; }
+  if (handle.endsWith('e')) { w += dx; }
+  return normalizeImageBBox({ h, w, x, y });
+}
+
+/** Moves a box without changing its size. */
+export function translateBBox(bbox: ImageBBox, dx: number, dy: number): ImageBBox {
+  const box = normalizeImageBBox(bbox);
+  return normalizeImageBBox({ h: box.h, w: box.w, x: box.x + dx, y: box.y + dy });
+}
+
+/**
+ * Keeps a draft box inside its container: a word inside its owning line, a
+ * line inside the canonical image. A box larger than the container is shrunk
+ * to fit rather than pushed outside; a box is never smaller than one pixel.
+ */
+export function clampBBoxWithin(bbox: ImageBBox, container: ImageBBox): ImageBBox {
+  const box = normalizeImageBBox(bbox);
+  const outer = normalizeImageBBox(container);
+  const w = Math.max(1, Math.min(box.w, outer.w));
+  const h = Math.max(1, Math.min(box.h, outer.h));
+  const x = Math.max(outer.x, Math.min(box.x, outer.x + outer.w - w));
+  const y = Math.max(outer.y, Math.min(box.y, outer.y + outer.h - h));
+  return { h, w, x, y };
+}
+
+/** Canonical image rectangle from an OpenSeadragon content size. */
+export function imageBoundsBBox(imageSize: ImageSize | null | undefined): ImageBBox | null {
+  const width = Number(imageSize?.width);
+  const height = Number(imageSize?.height);
+  if (!Number.isFinite(width) || width <= 0 || !Number.isFinite(height) || height <= 0) return null;
+  return { h: height, w: width, x: 0, y: 0 };
+}
+
+/** True when the inner box is entirely inside the outer box. */
+export function bboxIsWithin(inner: ImageBBox, outer: ImageBBox): boolean {
+  return inner.x >= outer.x
+    && inner.y >= outer.y
+    && inner.x + inner.w <= outer.x + outer.w
+    && inner.y + inner.h <= outer.y + outer.h;
+}
+
+/**
+ * Pans a viewport rectangle by the smallest offset that brings the target box
+ * fully into view. Returns null when the box is already visible so callers
+ * never animate a no-op.
+ */
+export function viewportOffsetToReveal(
+  target: ImageBBox,
+  viewport: ImageBBox,
+  padding = 0,
+): Point2D | null {
+  const box = normalizeImageBBox(target);
+  // A zoomed-out viewport may extend beyond the image with negative origins.
+  const view = viewport;
+  const padded = {
+    h: box.h + padding * 2,
+    w: box.w + padding * 2,
+    x: box.x - padding,
+    y: box.y - padding,
+  };
+  if (bboxIsWithin(padded, view)) return null;
+  let dx = 0;
+  let dy = 0;
+  if (padded.x < view.x) dx = padded.x - view.x;
+  else if (padded.x + padded.w > view.x + view.w) dx = Math.min(padded.x - view.x, padded.x + padded.w - (view.x + view.w));
+  if (padded.y < view.y) dy = padded.y - view.y;
+  else if (padded.y + padded.h > view.y + view.h) dy = Math.min(padded.y - view.y, padded.y + padded.h - (view.y + view.h));
+  return { x: dx, y: dy };
+}

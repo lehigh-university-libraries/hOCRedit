@@ -37,6 +37,7 @@ nav = [
     "development/adding-system-context.md",
     "development/adding-rpc.md",
     "development/mirador-plugin.md",
+    "development/editor-ux-review.md",
     "development/web-frontend.md",
     "development/testing.md",
     "development/database-migrations.md",

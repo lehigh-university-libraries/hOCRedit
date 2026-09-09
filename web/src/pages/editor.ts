@@ -10,6 +10,7 @@ import {
   publishItemImageEdits,
 } from "../api/annotations";
 import type { AnnotationPageSnapshot } from "../api/annotations";
+import { listContexts } from "../api/context";
 import { getEditorManifest } from "../api/items";
 import { getOCRRun, reprocessItemImage } from "../api/processing";
 import {
@@ -190,6 +191,10 @@ export async function renderEditor(app: HTMLElement): Promise<void> {
   const dirtyWindows = new Map<string, boolean>();
   let beforeUnloadRegistered = false;
   let processingContextID = params.get("contextId") ?? "0";
+  // The context chosen in the header for the next whole-page reprocess. "0"
+  // means "the context that produced the current OCR run".
+  let selectedReprocessContextID = "0";
+  let reprocessContextLoadSequence = 0;
   let activeItemImageID = itemImageID;
   let activeCanvasID = "";
   let activeWindowID = EDITOR_WINDOW_ID;
@@ -316,6 +321,7 @@ export async function renderEditor(app: HTMLElement): Promise<void> {
 
   async function handleFullReprocess() {
     if (!activeItemImageID || reprocessInFlight) return;
+    const requestedContextID = selectedReprocessContextID;
     const targetItemImageID = activeItemImageID;
     const targetCanvasID = activeCanvasID;
     const targetWindowID = activeWindowID;
@@ -334,8 +340,9 @@ export async function renderEditor(app: HTMLElement): Promise<void> {
         );
       }
 
-      const targetContextID =
-        await processingContextForItemImage(targetItemImageID);
+      const targetContextID = requestedContextID !== "0"
+        ? requestedContextID
+        : await processingContextForItemImage(targetItemImageID);
       const canonicalPage = await getAnnotationPage(targetItemImageID);
       publishBatchState("Reprocessing page with fresh segmentation...", true);
       setBatchBanner(
@@ -360,7 +367,12 @@ export async function renderEditor(app: HTMLElement): Promise<void> {
           "Reprocessing returned an invalid successor transcription job.",
         );
       }
+      // The successor run was produced by the requested context; later
+      // adapters and reprocess requests for this image must follow it.
+      processingContexts.set(targetItemImageID, targetContextID);
       if (activeItemImageID === targetItemImageID) {
+        processingContextID = targetContextID;
+        void loadReprocessContexts(targetContextID);
         requestedJobID = successorJobID;
         requestedJobItemImageID = targetItemImageID;
         const route = new URL(window.location.href);
@@ -438,6 +450,12 @@ export async function renderEditor(app: HTMLElement): Promise<void> {
   const reprocessNav = document.getElementById(
     "reprocess-nav",
   ) as HTMLButtonElement;
+  const reprocessContextSelect = document.getElementById(
+    "reprocess-context",
+  ) as HTMLSelectElement;
+  const editMetrics = document.getElementById(
+    "editor-edit-metrics",
+  ) as HTMLParagraphElement;
   const leaveDialog = document.getElementById("leave-dialog") as HTMLDivElement;
   const leaveCancel = document.getElementById(
     "leave-cancel",
@@ -471,6 +489,8 @@ export async function renderEditor(app: HTMLElement): Promise<void> {
   const osdConfig = {
     crossOriginPolicy: "Anonymous",
     ajaxWithCredentials: false,
+    // A single click selects a word or line in the editor; it must never zoom.
+    gestureSettingsMouse: { clickToZoom: false, dblClickToZoom: true },
   };
   let lastSegmentKey = "";
   let lastResultKey = "";
@@ -1498,6 +1518,11 @@ export async function renderEditor(app: HTMLElement): Promise<void> {
     cancelPendingCompletedReload();
     const sequence = ++activationSequence;
     activeItemImageID = targetItemImageID;
+    // A choice made for the previous image must never apply to this one.
+    selectedReprocessContextID = "0";
+    reprocessContextLoadSequence += 1;
+    reprocessContextSelect.value = "0";
+    reprocessContextSelect.disabled = true;
     lastSegmentKey = "";
     lastResultKey = "";
     eventSubscription?.close();
@@ -1518,6 +1543,8 @@ export async function renderEditor(app: HTMLElement): Promise<void> {
       }
       processingContextID = run.contextId.toString();
       processingContexts.set(targetItemImageID, processingContextID);
+      editMetrics.textContent = "";
+      void loadReprocessContexts(processingContextID);
       meta.textContent = itemID
         ? `item ${itemID} | image ${targetItemImageID} | model ${run.model}`
         : `item image ${targetItemImageID} | model ${run.model}`;
@@ -1666,6 +1693,86 @@ export async function renderEditor(app: HTMLElement): Promise<void> {
     window.history.pushState(historySentinel, "", window.location.href);
     leaveDialogController.open();
   }
+
+  function renderReprocessContexts(
+    contexts: Array<{ id: bigint; name: string; isDefault: boolean }>,
+    currentContextID: string,
+  ): void {
+    const current = contexts.find((ctx) => ctx.id.toString() === currentContextID);
+    setHTML(
+      reprocessContextSelect,
+      html`<option value="0">${current ? `Current: ${current.name || `Context ${currentContextID}`}` : "Current context"}</option>${contexts
+        .filter((ctx) => ctx.id !== 0n && ctx.id.toString() !== currentContextID)
+        .map((ctx) => html`<option value="${ctx.id.toString()}">${ctx.name || `Context ${ctx.id}`}${ctx.isDefault ? " (default)" : ""}</option>`)}`,
+    );
+    reprocessContextSelect.value = "0";
+    selectedReprocessContextID = "0";
+    reprocessContextSelect.disabled = false;
+  }
+
+  async function loadReprocessContexts(currentContextID: string): Promise<void> {
+    const sequence = ++reprocessContextLoadSequence;
+    selectedReprocessContextID = "0";
+    reprocessContextSelect.value = "0";
+    reprocessContextSelect.disabled = true;
+    try {
+      const contexts = await listContexts();
+      if (editorDisposed || sequence !== reprocessContextLoadSequence) return;
+      renderReprocessContexts(contexts, currentContextID);
+    } catch {
+      if (editorDisposed || sequence !== reprocessContextLoadSequence) return;
+      // The header still offers "current context"; a catalog failure must not
+      // block editing or reprocessing with the run's own context.
+      reprocessContextSelect.disabled = false;
+    }
+  }
+
+  function formatCorrection(correction: {
+    levenshteinDistance: number;
+    baselineCharacters: number;
+  } | null): string {
+    if (!correction) return "";
+    const ratio = correction.baselineCharacters > 0
+      ? ` (${Math.round((correction.levenshteinDistance / correction.baselineCharacters) * 1000) / 10}% of the model text)`
+      : "";
+    return ` Distance from the model baseline: ${correction.levenshteinDistance} characters${ratio}.`;
+  }
+
+  const handleEditMetrics = (event: Event) => {
+    const detail = (
+      event as CustomEvent<{
+        canvasId: string;
+        correction: { levenshteinDistance: number; baselineCharacters: number } | null;
+        itemImageId: string;
+        revision: string;
+        summary: string;
+        windowId: string;
+      }>
+    ).detail;
+    if (
+      !detail
+      || detail.windowId !== activeWindowID
+      || detail.canvasId !== activeCanvasID
+      || detail.itemImageId !== activeItemImageID
+    ) return;
+    editMetrics.textContent = `Saved revision ${detail.revision}: ${detail.summary}.${formatCorrection(detail.correction)}`;
+  };
+
+  const handleReprocessRequest = (event: Event) => {
+    const detail = (
+      event as CustomEvent<{ canvasId: string; itemImageId: string; windowId: string }>
+    ).detail;
+    if (
+      !detail
+      || detail.windowId !== activeWindowID
+      || detail.canvasId !== activeCanvasID
+      || detail.itemImageId !== activeItemImageID
+    ) return;
+    void handleFullReprocess();
+  };
+  reprocessContextSelect.addEventListener("change", () => {
+    selectedReprocessContextID = reprocessContextSelect.value || "0";
+  });
 
   const handleHomeNavigationClick = (event: Event) => {
     event.preventDefault();
@@ -1887,6 +1994,8 @@ export async function renderEditor(app: HTMLElement): Promise<void> {
   };
   document.addEventListener("scribe:dirty-state", handleDirtyState);
   document.addEventListener("scribe:active-canvas", handleActiveCanvas);
+  document.addEventListener("scribe:edit-metrics", handleEditMetrics);
+  document.addEventListener("scribe:request-reprocess", handleReprocessRequest);
   document.addEventListener(
     "scribe:remote-rebase-ready",
     handleRemoteRebaseReady,
@@ -1960,6 +2069,8 @@ export async function renderEditor(app: HTMLElement): Promise<void> {
       cancelPendingCompletedReload();
       document.removeEventListener("scribe:dirty-state", handleDirtyState);
       document.removeEventListener("scribe:active-canvas", handleActiveCanvas);
+      document.removeEventListener("scribe:edit-metrics", handleEditMetrics);
+      document.removeEventListener("scribe:request-reprocess", handleReprocessRequest);
       document.removeEventListener(
         "scribe:remote-rebase-ready",
         handleRemoteRebaseReady,
@@ -2059,6 +2170,7 @@ export async function renderEditor(app: HTMLElement): Promise<void> {
   }
   processingContextID = runResp.contextId.toString() || processingContextID;
   processingContexts.set(runItemImageID, processingContextID);
+  void loadReprocessContexts(processingContextID);
   meta.textContent = itemID
     ? `item ${itemID} | image ${runItemImageID || "unknown"} | model ${runResp.model}`
     : `item image ${runItemImageID || "unknown"} | model ${runResp.model}`;

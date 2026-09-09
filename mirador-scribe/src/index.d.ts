@@ -5,6 +5,8 @@ import type {
   ScribeAnnotationMutationEventDetail,
   ScribeDirtyStateEventDetail,
   ScribeCreateAnnotationEventDetail,
+  ScribeEditMetricsEventDetail,
+  ScribeReprocessRequestEventDetail,
   ScribeCreateLineAtViewportCenterEventDetail,
   ScribeFocusResizeHandleEventDetail,
   ScribePublishRequestEventDetail,
@@ -21,6 +23,13 @@ import type {
 
 export type {
   AnnotationChange,
+  AnnotationCorrectionMetric,
+  EditOperationCounts,
+  EditOperationKind,
+  PageEditMetrics,
+  ScribeOverlayMode,
+  ScribeEditMetricsEventDetail,
+  ScribeReprocessRequestEventDetail,
   AnnotationMutation,
   AnnotationPageSnapshot,
   AnnotationResource,
@@ -71,6 +80,7 @@ declare global {
     'scribe:active-canvas': CustomEvent<ScribeActiveCanvasEventDetail>;
     'scribe:annotation-mutation': CustomEvent<ScribeAnnotationMutationEventDetail>;
     'scribe:dirty-state': CustomEvent<ScribeDirtyStateEventDetail>;
+    'scribe:edit-metrics': CustomEvent<ScribeEditMetricsEventDetail>;
     'scribe:create-annotation': CustomEvent<ScribeCreateAnnotationEventDetail>;
     'scribe:create-line-at-viewport-center': CustomEvent<ScribeCreateLineAtViewportCenterEventDetail>;
     'scribe:focus-resize-handle': CustomEvent<ScribeFocusResizeHandleEventDetail>;
@@ -79,6 +89,7 @@ declare global {
     'scribe:reload-annotations-result': CustomEvent<ScribeReloadAnnotationsResultEventDetail>;
     'scribe:remote-rebase-ready': CustomEvent<ScribeRemoteRebaseReadyEventDetail>;
     'scribe:request-publish': CustomEvent<ScribePublishRequestEventDetail>;
+    'scribe:request-reprocess': CustomEvent<ScribeReprocessRequestEventDetail>;
     'scribe:request-save': CustomEvent<ScribeSaveRequestEventDetail>;
     'scribe:save-result': CustomEvent<ScribeSaveResultEventDetail>;
     'scribe:transcription-job-state': CustomEvent<ScribeTranscriptionJobStateEventDetail>;

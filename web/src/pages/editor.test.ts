@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   getAnnotationPage: vi.fn(),
   annotationAdapter: vi.fn(),
   getEditorManifest: vi.fn(),
+  listContexts: vi.fn(),
 }));
 
 vi.mock("mirador", () => ({
@@ -48,6 +49,10 @@ vi.mock("../api/items", () => ({
   getEditorManifest: mocks.getEditorManifest,
 }));
 
+vi.mock("../api/context", () => ({
+  listContexts: mocks.listContexts,
+}));
+
 vi.mock("../api/events", () => ({
   subscribeToEvents: mocks.subscribeToEvents,
 }));
@@ -66,6 +71,8 @@ describe("renderEditor", () => {
     mocks.getAnnotationPage.mockReset();
     mocks.annotationAdapter.mockReset();
     mocks.getEditorManifest.mockReset();
+    mocks.listContexts.mockReset();
+    mocks.listContexts.mockResolvedValue([]);
     mocks.getEditorManifest.mockImplementation(async (itemImageId: string) => ({
       item: {
         id: "test-item",
@@ -2990,5 +2997,188 @@ describe("renderEditor", () => {
 
     expect(reloads).toBe(0);
     await vi.waitFor(() => expect(reloads).toBe(1));
+  });
+});
+
+describe("renderEditor reprocessing contexts and edit metrics", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+    window.history.replaceState({}, "", "/editor?itemImageId=7");
+    mocks.viewer.mockReset();
+    mocks.getOCRRun.mockReset();
+    mocks.getTranscriptionJob.mockReset();
+    mocks.reprocessItemImage.mockReset();
+    mocks.listTranscriptionJobs.mockReset();
+    mocks.subscribeToEvents.mockReset();
+    mocks.publishItemImageEdits.mockReset();
+    mocks.getAnnotationPage.mockReset();
+    mocks.annotationAdapter.mockReset();
+    mocks.getEditorManifest.mockReset();
+    mocks.listContexts.mockReset();
+    mocks.getEditorManifest.mockImplementation(async (itemImageId: string) => ({
+      item: {
+        id: "test-item",
+        images: [{ id: BigInt(itemImageId), canvasUri: "https://example.test/canvas/1" }],
+      },
+      manifestJSON: JSON.stringify({ id: "https://example.test/manifest", type: "Manifest", items: [] }),
+      selectedCanvasId: "https://example.test/canvas/1",
+    }));
+    mocks.subscribeToEvents.mockReturnValue({ close: vi.fn() });
+    mocks.getOCRRun.mockResolvedValue({
+      contextId: 33n,
+      itemImageId: 7n,
+      model: "test-model",
+      imageUrl: "https://example.test/page.jpg",
+    });
+    mocks.listTranscriptionJobs.mockResolvedValue([]);
+    mocks.getAnnotationPage.mockResolvedValue({
+      canvasUri: "https://example.test/canvas/1",
+      page: { id: "https://scribe.test/pages/7", type: "AnnotationPage", items: [] },
+      revision: "19",
+      updatedAt: "2026-07-20T00:00:00Z",
+    });
+    mocks.listContexts.mockResolvedValue([
+      { id: 33n, name: "Kraken manuscripts", isDefault: false },
+      { id: 34n, name: "Tesseract print", isDefault: true },
+      { id: 35n, name: "", isDefault: false },
+    ]);
+  });
+
+  afterEach(() => {
+    window.dispatchEvent(new Event("pagehide"));
+  });
+
+  it("offers the workspace contexts with the run's own context preselected", async () => {
+    const app = document.createElement("div");
+    document.body.appendChild(app);
+    await renderEditor(app);
+
+    const select = document.getElementById("reprocess-context") as HTMLSelectElement;
+    await vi.waitFor(() => expect(select.disabled).toBe(false));
+    expect(Array.from(select.options).map((option) => [option.value, option.textContent])).toEqual([
+      ["0", "Current: Kraken manuscripts"],
+      ["34", "Tesseract print (default)"],
+      ["35", "Context 35"],
+    ]);
+    expect(select.value).toBe("0");
+    expect(document.getElementById("reprocess-nav")?.textContent).toBe("Reprocess page");
+  });
+
+  it("reprocesses the whole page with the context chosen in the header and adopts it", async () => {
+    mocks.reprocessItemImage.mockResolvedValue({ itemImageId: 7n, transcriptionJobId: 92n });
+    mocks.getTranscriptionJob.mockResolvedValue({
+      id: 92n, itemImageId: 7n, status: "pending", completedSegments: 0, failedSegments: 0, totalSegments: 1,
+    });
+    const app = document.createElement("div");
+    document.body.appendChild(app);
+    await renderEditor(app);
+    const select = document.getElementById("reprocess-context") as HTMLSelectElement;
+    await vi.waitFor(() => expect(select.disabled).toBe(false));
+
+    select.value = "34";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    document.getElementById("reprocess-nav")?.click();
+
+    await vi.waitFor(() =>
+      expect(mocks.reprocessItemImage).toHaveBeenCalledWith("7", "34", "19"),
+    );
+    // Later adapters for this image follow the context that produced the new run.
+    const runtime = mocks.viewer.mock.calls[0][0].annotation.adapter;
+    await vi.waitFor(() => {
+      runtime("https://example.test/canvas/1");
+      expect(mocks.annotationAdapter).toHaveBeenLastCalledWith(
+        expect.any(String), 3, "https://example.test/canvas/1", "Scribe User",
+        expect.objectContaining({ contextId: "34", itemImageId: "7" }),
+      );
+    });
+    await vi.waitFor(() => expect(select.options[0]?.textContent).toBe("Current: Tesseract print"));
+    expect(select.value).toBe("0");
+  });
+
+  it("does not let a late context catalog replace the active image's choices", async () => {
+    mocks.getEditorManifest.mockResolvedValue({
+      item: { id: "test-item", images: [
+        { id: 7n, canvasUri: "https://example.test/canvas/1" },
+        { id: 8n, canvasUri: "https://example.test/canvas/2" },
+      ] },
+      manifestJSON: JSON.stringify({ id: "https://example.test/manifest", type: "Manifest", items: [] }),
+      selectedCanvasId: "https://example.test/canvas/1",
+    });
+    let resolveOldCatalog!: (contexts: unknown[]) => void;
+    mocks.listContexts.mockImplementation(() => new Promise((resolve) => { resolveOldCatalog = resolve; }));
+    const app = document.createElement("div");
+    document.body.appendChild(app);
+    await renderEditor(app);
+    const oldCatalog = resolveOldCatalog;
+    mocks.getOCRRun.mockResolvedValue({ contextId: 34n, itemImageId: 8n, model: "new-model" });
+    mocks.listContexts.mockResolvedValue([{ id: 34n, name: "New context", isDefault: false }]);
+    document.dispatchEvent(new CustomEvent("scribe:active-canvas", {
+      detail: { canvasId: "https://example.test/canvas/2", itemImageId: "8", windowId: "scribe-editor-window" },
+    }));
+    const select = document.getElementById("reprocess-context") as HTMLSelectElement;
+    await vi.waitFor(() => expect(select.options[0]?.textContent).toBe("Current: New context"));
+    oldCatalog([{ id: 33n, name: "Old context", isDefault: false }]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(select.options[0]?.textContent).toBe("Current: New context");
+  });
+
+  it("reprocesses on the plugin's scoped request and ignores requests for another page", async () => {
+    mocks.reprocessItemImage.mockResolvedValue({ itemImageId: 7n, transcriptionJobId: 92n });
+    mocks.getTranscriptionJob.mockResolvedValue({
+      id: 92n, itemImageId: 7n, status: "pending", completedSegments: 0, failedSegments: 0, totalSegments: 1,
+    });
+    const app = document.createElement("div");
+    document.body.appendChild(app);
+    await renderEditor(app);
+
+    document.dispatchEvent(new CustomEvent("scribe:request-reprocess", {
+      detail: { canvasId: "https://example.test/canvas/2", itemImageId: "8", windowId: "scribe-editor-window" },
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(mocks.reprocessItemImage).not.toHaveBeenCalled();
+
+    document.dispatchEvent(new CustomEvent("scribe:request-reprocess", {
+      detail: { canvasId: "https://example.test/canvas/1", itemImageId: "7", windowId: "scribe-editor-window" },
+    }));
+    await vi.waitFor(() =>
+      expect(mocks.reprocessItemImage).toHaveBeenCalledWith("7", "33", "19"),
+    );
+  });
+
+  it("shows the saved edit summary and baseline distance for the active page only", async () => {
+    const app = document.createElement("div");
+    document.body.appendChild(app);
+    await renderEditor(app);
+    const metrics = document.getElementById("editor-edit-metrics") as HTMLParagraphElement;
+
+    document.dispatchEvent(new CustomEvent("scribe:edit-metrics", {
+      detail: {
+        canvasId: "https://example.test/canvas/1",
+        correction: null,
+        itemImageId: "8",
+        metrics: {},
+        operations: {},
+        revision: "20",
+        summary: "1 word retyped",
+        windowId: "scribe-editor-window",
+      },
+    }));
+    expect(metrics.textContent).toBe("");
+
+    document.dispatchEvent(new CustomEvent("scribe:edit-metrics", {
+      detail: {
+        canvasId: "https://example.test/canvas/1",
+        correction: { baselineCharacters: 200, correctedCharacters: 201, levenshteinDistance: 5 },
+        itemImageId: "7",
+        metrics: {},
+        operations: {},
+        revision: "20",
+        summary: "2 words retyped, 1 box moved",
+        windowId: "scribe-editor-window",
+      },
+    }));
+    expect(metrics.textContent).toBe(
+      "Saved revision 20: 2 words retyped, 1 box moved. Distance from the model baseline: 5 characters (2.5% of the model text).",
+    );
   });
 });

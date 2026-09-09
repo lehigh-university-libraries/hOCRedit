@@ -15,6 +15,7 @@ import { editorBridgeEventDetail, useDocumentEvent } from './useDocumentEvent';
  * @param {(canvasId?: string) => boolean} options.editingIsBlocked
  * @param {IIIFAnnotationPage | null} options.localPage
  * @param {(page: IIIFAnnotationPage) => void} options.pushHistory
+ * @param {(kind: import('../types/scribe').EditOperationKind) => void} [options.recordOperation]
  * @param {(windowId: string, annotationId: string) => unknown} options.selectAnnotation
  * @param {(active: boolean) => void} options.setDrawMode
  * @param {(mode: 'edit') => void} options.setOverlayMode
@@ -26,6 +27,7 @@ export function useAnnotationCreationBridge({
   editingIsBlocked,
   localPage,
   pushHistory,
+  recordOperation = () => {},
   selectAnnotation,
   setDrawMode,
   setOverlayMode,
@@ -39,6 +41,7 @@ export function useAnnotationCreationBridge({
 
     const created = createDraftLineAnnotation(canvasId, detail.bbox, localPage.id || '');
     pushHistory(upsertAnnotationInPage(localPage, created));
+    recordOperation('line-create');
     setDrawMode(false);
     if (detail.focusResizeHandle) setOverlayMode('edit');
     if (created?.id) {

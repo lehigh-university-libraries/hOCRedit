@@ -42,9 +42,25 @@ function normalizeSnapshot(snapshot) {
     throw new Error('The annotation service returned an invalid IIIF AnnotationPage');
   }
   return {
+    correction: normalizeCorrection(candidate.correction),
     page: clone(/** @type {CanonicalIIIFAnnotationPage} */ (page)),
     revision: String(candidate.revision ?? ''),
     updatedAt: String(candidate.updatedAt ?? ''),
+  };
+}
+
+/** @param {unknown} value @returns {import('../types/scribe').AnnotationCorrectionMetric | null} */
+function normalizeCorrection(value) {
+  if (!value || typeof value !== 'object') return null;
+  const candidate = /** @type {RawIIIFProperties} */ (value);
+  const distance = Number(candidate.levenshteinDistance);
+  if (!Number.isSafeInteger(distance) || distance < 0) return null;
+  const baseline = Number(candidate.baselineCharacters);
+  const corrected = Number(candidate.correctedCharacters);
+  return {
+    baselineCharacters: Number.isSafeInteger(baseline) && baseline >= 0 ? baseline : 0,
+    correctedCharacters: Number.isSafeInteger(corrected) && corrected >= 0 ? corrected : 0,
+    levenshteinDistance: distance,
   };
 }
 

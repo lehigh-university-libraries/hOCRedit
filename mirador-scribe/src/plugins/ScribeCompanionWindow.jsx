@@ -15,12 +15,18 @@ import {
   editorSessionForCanvas,
 } from '../editor/sessionCache';
 import { applyAdapterMutationToPage } from '../editor/adapterMutation';
+import {
+  formatEditMetrics,
+  pageEditMetrics,
+  recordEditOperation,
+} from '../editor/editMetrics';
 import { imageBBoxContainsCenter, wordBBoxBesideSelection } from '../editor/geometry';
 import { editorKeyboardCommand } from '../editor/keyboard';
 import {
   annotationBBox,
   annotationCanvasId,
   annotationIntersectsImageRect,
+  annotationText,
   createDraftWordAnnotation,
   editorRowTransformCapabilities,
   editorSelectedAnnotation,
@@ -38,7 +44,6 @@ import { useStructuralEdits } from './useStructuralEdits';
 import { useAnnotationBootstrap } from './useAnnotationBootstrap';
 import { useEditorPersistence } from './useEditorPersistence';
 import { useEditorPublish } from './useEditorPublish';
-import { useEditorTranscription } from './useEditorTranscription';
 import { useRemoteAnnotationRebase } from './useRemoteAnnotationRebase';
 import { useAnnotationCreationBridge } from './useAnnotationCreationBridge';
 import { useInlineEditorBridge } from './useInlineEditorBridge';
@@ -46,13 +51,16 @@ import { useAnnotationMutationBridge } from './useAnnotationMutationBridge';
 import { useEditorRequestBridge, useViewportBridge } from './useEditorRequestBridge';
 
 /**
+ * @typedef {import('../types/scribe').AnnotationCorrectionMetric} AnnotationCorrectionMetric
+ * @typedef {import('../types/scribe').EditOperationCounts} EditOperationCounts
+ * @typedef {import('../types/scribe').EditOperationKind} EditOperationKind
  * @typedef {import('../types/scribe').EditorSessionAction} EditorSessionAction
  * @typedef {import('../types/scribe').EditorSessionCache} EditorSessionCache
  * @typedef {import('../types/scribe').IIIFAnnotationPage} IIIFAnnotationPage
  * @typedef {import('../types/scribe').MiradorState} MiradorState
  * @typedef {import('../types/scribe').ScribeAdapterFactory} ScribeAdapterFactory
  * @typedef {import('../types/scribe').ScribeAdapterLike} ScribeAdapterLike
- * @typedef {'none' | 'edit' | 'read' | 'outline'} OverlayMode
+ * @typedef {import('../types/scribe').ScribeOverlayMode} OverlayMode
  * @typedef {Object} ScribeCompanionWindowProps
  * @property {ScribeAdapterFactory | null | undefined} adapterFactory
  * @property {string} canvasId
@@ -67,6 +75,12 @@ import { useEditorRequestBridge, useViewportBridge } from './useEditorRequestBri
  * @typedef {(action: Record<string, unknown>) => unknown} MiradorDispatch
  */
 
+/** @param {IIIFAnnotationPage | null | undefined} page @returns {boolean} */
+function pageHasText(page) {
+  return (Array.isArray(page?.items) ? page.items : [])
+    .some((annotation) => isLineAnnotation(annotation) && annotationText(annotation).trim() !== '');
+}
+
 /** @param {ScribeCompanionWindowProps} props */
 export function ScribeCompanionWindow({
   adapterFactory,
@@ -79,14 +93,6 @@ export function ScribeCompanionWindow({
   serverPage,
   windowId,
 }) {
-  /** @param {OverlayMode} current @returns {OverlayMode} */
-  function cycleOverlayMode(current) {
-    if (current === 'none') return 'edit';
-    if (current === 'edit') return 'read';
-    if (current === 'read') return 'outline';
-    return 'none'; // 'outline' → 'none'
-  }
-
   const [operationBusy, setOperationBusyState] = useState(false);
   const operationBusyRef = useRef(false);
   /** @param {boolean} value */
@@ -121,12 +127,10 @@ export function ScribeCompanionWindow({
   );
   const localPage = session.draftPage;
   const [viewportBounds, setViewportBounds] = useState(/** @type {{ x: number, y: number, w: number, h: number } | null} */ (null));
-  const [transcribeDialogOpen, setTranscribeDialogOpen] = useState(false);
   const [batchTranscriptionState, setBatchTranscriptionState] = useState(() => ({
     active: true,
     canvasId,
   }));
-  const [transcribeSelection, setTranscribeSelection] = useState(/** @type {string[]} */ ([]));
   const [drawMode, setDrawMode] = useState(false);
   const [overlayMode, setOverlayMode] = useState(/** @type {OverlayMode} */ ('none'));
   const [focusedWordAnnotationId, setFocusedWordAnnotationId] = useState('');
@@ -139,6 +143,8 @@ export function ScribeCompanionWindow({
   const activeCanvasEventRef = useRef('');
   const activeCanvasRef = useRef(canvasId);
   const batchTranscriptionStateRef = useRef({ active: true, canvasId });
+  const operationCountsRef = useRef(/** @type {Map<string, EditOperationCounts>} */ (new Map()));
+  const autoReadCanvasesRef = useRef(/** @type {Set<string>} */ (new Set()));
   activeCanvasRef.current = canvasId;
   if (batchTranscriptionStateRef.current.canvasId !== canvasId) {
     batchTranscriptionStateRef.current = { active: true, canvasId };
@@ -152,20 +158,14 @@ export function ScribeCompanionWindow({
       current.canvasId === next.canvasId && current.active === next.active ? current : next
     ));
   }, [canvasId]);
-  const foregroundTranscriptionIsBlocked = useCallback(() => {
-    const current = batchTranscriptionStateRef.current;
-    return current.canvasId !== canvasId || current.active;
-  }, [canvasId]);
   const inlineEditorVisible = overlayMode === 'edit';
   const textOverlayVisible = overlayMode === 'read';
 
-  useEffect(() => {
-    setTranscribeDialogOpen(false);
-  }, [canvasId]);
-
-  useEffect(() => {
-    if (batchTranscriptionActive) setTranscribeDialogOpen(false);
-  }, [batchTranscriptionActive]);
+  const recordOperation = useCallback((/** @type {EditOperationKind} */ kind, targetCanvasId = activeCanvasRef.current) => {
+    if (!targetCanvasId) return;
+    const counts = operationCountsRef.current.get(targetCanvasId) || {};
+    operationCountsRef.current.set(targetCanvasId, recordEditOperation(counts, kind));
+  }, []);
 
   // Mirador's annotation slice is a rendered projection only. Keep it aligned
   // with the reducer draft so undo, structural transforms, and unsaved geometry
@@ -212,6 +212,7 @@ export function ScribeCompanionWindow({
   }, [adapterFactory, canvasId, isFocusedWindow, windowId]);
 
   function toggleDrawMode() {
+    autoReadCanvasesRef.current.add(canvasId);
     setDrawMode((current) => {
       const next = !current;
       if (next) {
@@ -229,9 +230,22 @@ export function ScribeCompanionWindow({
     }));
   }
 
-  function cycleOverlayModeFromToolbar() {
+  /** @param {OverlayMode} mode */
+  function selectOverlayMode(mode) {
+    autoReadCanvasesRef.current.add(canvasId);
     setDrawMode(false);
-    setOverlayMode(cycleOverlayMode);
+    setOverlayMode(mode);
+  }
+
+  function requestReprocess() {
+    if (batchTranscriptionActive || isBusy) return;
+    const detail = activeCanvasEventDetail(adapterFactory, canvasId, windowId);
+    if (!detail) {
+      setStatusMessage('Reprocessing is unavailable until the focused page has loaded.');
+      return;
+    }
+    setDrawMode(false);
+    document.dispatchEvent(new CustomEvent('scribe:request-reprocess', { detail }));
   }
 
   useAnnotationBootstrap({
@@ -251,14 +265,11 @@ export function ScribeCompanionWindow({
     if (!viewportBounds) return annotations;
     return annotations.filter((annotation) => annotationIntersectsImageRect(annotation, viewportBounds));
   }, [annotations, viewportBounds]);
-  const visibleLineAnnotations = useMemo(
-    () => visibleAnnotations.filter(isLineAnnotation),
-    [visibleAnnotations],
-  );
   const hasPageLines = useMemo(
     () => annotations.some(isLineAnnotation),
     [annotations],
   );
+  const hasPageText = useMemo(() => pageHasText(localPage), [localPage]);
   const visibleRows = useMemo(() => groupAnnotationsForEditor({ items: visibleAnnotations }), [visibleAnnotations]);
   const selectedAnnotation = useMemo(
     () => editorSelectedAnnotation(
@@ -281,6 +292,22 @@ export function ScribeCompanionWindow({
     return (isLineAnnotation(rowLead) ? rowLead : null)
       || lineAnnotationForSelection(localPage, selectedAnnotation);
   }, [localPage, selectedAnnotation, selectedRow]);
+  const focusedWordAnnotation = useMemo(() => {
+    if (!focusedWordAnnotationId) return null;
+    const candidate = annotations.find((annotation) => annotation.id === focusedWordAnnotationId) || null;
+    return candidate && isWordAnnotation(candidate) ? candidate : null;
+  }, [annotations, focusedWordAnnotationId]);
+  // Deleting acts on the most specific thing the person is looking at: the
+  // focused word when there is one, otherwise the selected annotation.
+  const deleteTarget = useMemo(() => {
+    const target = focusedWordAnnotation || selectedAnnotation;
+    if (!target?.id) return null;
+    return {
+      granularity: isWordAnnotation(target) ? /** @type {const} */ ('word') : /** @type {const} */ ('line'),
+      id: target.id,
+      text: annotationText(target),
+    };
+  }, [focusedWordAnnotation, selectedAnnotation]);
   const { canSplitLine, canSplitToWords } = useMemo(
     () => editorRowTransformCapabilities(selectedRow),
     [selectedRow],
@@ -300,6 +327,7 @@ export function ScribeCompanionWindow({
     editingIsBlocked,
     focusedWordAnnotationId,
     localPage,
+    recordOperation,
     requireAdapter,
     selectedLineAnnotation,
     selectedRow,
@@ -319,6 +347,17 @@ export function ScribeCompanionWindow({
       },
     }));
   }, [canvasId, dirtyCanvasIds, hasDirtySessions, windowId]);
+
+  // Text arriving on a page whose overlay is off (a fresh upload finishing
+  // its automatic transcription, or opening an already transcribed page)
+  // turns the read overlay on once so the transcription is visible without
+  // a further click. An explicit mode choice is never overridden.
+  useEffect(() => {
+    if (!hasPageText) return;
+    if (autoReadCanvasesRef.current.has(canvasId)) return;
+    autoReadCanvasesRef.current.add(canvasId);
+    if (overlayMode === 'none' && !drawMode) setOverlayMode('read');
+  }, [canvasId, drawMode, hasPageText, overlayMode]);
 
   useEffect(() => {
     const pendingRedoSelection = pendingRedoSelectionRef.current;
@@ -369,17 +408,6 @@ export function ScribeCompanionWindow({
     }
   }, [effectiveSelectedAnnotationId, focusedWordAnnotationId, localPage]);
 
-  useEffect(() => {
-    const validIds = new Set(visibleLineAnnotations.map((annotation) => annotation.id));
-    const selectedLineId = selectedLineAnnotation?.id || '';
-    const preferred = validIds.has(selectedLineId) ? selectedLineId : visibleLineAnnotations[0]?.id || '';
-    setTranscribeSelection((current) => {
-      const retained = current.filter((id) => validIds.has(id));
-      if (retained.length > 0) return retained;
-      return preferred ? [preferred] : [];
-    });
-  }, [selectedLineAnnotation?.id, visibleLineAnnotations]);
-
   useViewportBridge({ canvasId, setViewportBounds, windowId });
 
   useEffect(() => {
@@ -396,26 +424,27 @@ export function ScribeCompanionWindow({
       } else if (command === 'redo') {
         handleRedo();
       } else if (command === 'delete') {
-        const targetId = focusedWordAnnotationId || selectedAnnotation?.id;
-        if (targetId) {
-          handleDelete(targetId);
-        }
+        if (deleteTarget) handleDelete(deleteTarget.id);
       } else if (command === 'dismiss-overlay') {
-        setDrawMode(false);
-        setOverlayMode('none');
+        selectOverlayMode('none');
       } else if (command === 'edit-overlay') {
-        setDrawMode(false);
-        setOverlayMode('edit');
+        selectOverlayMode('edit');
+      } else if (command === 'read-overlay') {
+        selectOverlayMode('read');
+      } else if (command === 'transcript-overlay') {
+        selectOverlayMode('transcript');
+      } else if (command === 'add-line') {
+        createCenteredLine();
+      } else if (command === 'add-word') {
+        handleAddWord();
       } else if (command === 'split-line') {
         structuralEdits.openSplit();
       } else if (command === 'join-lines') {
         structuralEdits.openJoinLines();
       } else if (command === 'join-words') {
         structuralEdits.openJoinWords();
-      } else if (command === 'retranscribe') {
-        if (!foregroundTranscriptionIsBlocked() && !isBusy && hasPageLines) {
-          setTranscribeDialogOpen(true);
-        }
+      } else if (command === 'reprocess') {
+        requestReprocess();
       } else if (command === 'publish') {
         void handlePublish();
       }
@@ -423,7 +452,7 @@ export function ScribeCompanionWindow({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [adapterFactory, canvasId, focusedWordAnnotationId, foregroundTranscriptionIsBlocked, hasPageLines, isBusy, isFocusedWindow, localPage, selectedAnnotation, structuralEdits]);
+  }, [adapterFactory, batchTranscriptionActive, canvasId, deleteTarget, focusedWordAnnotationId, hasPageLines, isBusy, isFocusedWindow, localPage, selectedAnnotation, structuralEdits]);
 
   useEffect(() => {
     document.dispatchEvent(new CustomEvent('scribe:set-draw-mode', {
@@ -487,10 +516,13 @@ export function ScribeCompanionWindow({
       detail: {
         bbox: annotationBBox(focusTarget),
         canvasId,
+        // The transcript pane steps through rows; re-framing every row would
+        // make the image jump, so only bring an off-screen line into view.
+        ensureVisible: overlayMode === 'transcript',
         windowId,
       },
     }));
-  }, [canvasId, localPage, selectedAnnotation, windowId]);
+  }, [canvasId, localPage, overlayMode, selectedAnnotation, windowId]);
 
   useEffect(() => {
     if (didInitialSnapRef.current) return;
@@ -511,6 +543,7 @@ export function ScribeCompanionWindow({
     editingIsBlocked,
     localPage,
     pushHistory,
+    recordOperation,
     selectAnnotation,
     setDrawMode,
     setOverlayMode,
@@ -586,6 +619,36 @@ export function ScribeCompanionWindow({
     receiveAnnotation(targetCanvasId, page.id, page);
   }
 
+  /**
+   * Publishes what one committed save changed. The page diff is computed
+   * against the base revision the save replaced; the correction metric is
+   * whatever the server derived against the OCR baseline.
+   *
+   * @param {string} targetCanvasId
+   * @param {{ basePage: IIIFAnnotationPage | null, correction: AnnotationCorrectionMetric | null, revision: string, savedPage: IIIFAnnotationPage | null }} saved
+   * @returns {string}
+   */
+  function publishEditMetrics(targetCanvasId, saved) {
+    const metrics = pageEditMetrics(saved.basePage, saved.savedPage);
+    const operations = operationCountsRef.current.get(targetCanvasId) || {};
+    operationCountsRef.current.delete(targetCanvasId);
+    const summary = formatEditMetrics(metrics);
+    const identity = activeCanvasEventDetail(adapterFactory, targetCanvasId, windowId);
+    document.dispatchEvent(new CustomEvent('scribe:edit-metrics', {
+      detail: {
+        canvasId: targetCanvasId,
+        correction: saved.correction,
+        itemImageId: identity?.itemImageId || '',
+        metrics,
+        operations,
+        revision: saved.revision,
+        summary,
+        windowId,
+      },
+    }));
+    return summary;
+  }
+
   const {
     handleSave,
     performSave,
@@ -596,6 +659,7 @@ export function ScribeCompanionWindow({
     canvasId,
     dispatchSessionForCanvas,
     editingIsBlocked,
+    onSaved: publishEditMetrics,
     saveInFlightRef,
     selectedAnnotation,
     sessionCacheRef,
@@ -613,27 +677,6 @@ export function ScribeCompanionWindow({
     selectedAnnotation,
     setOperationBusy,
     setStatusMessage,
-    windowId,
-  });
-  const { handleTranscribe } = useEditorTranscription({
-    activeCanvasRef,
-    adapterFactory,
-    applyTransformResult,
-    canvasId,
-    editingIsBlocked,
-    foregroundTranscriptionIsBlocked,
-    localPage,
-    mountedRef,
-    operationBusyRef,
-    overlayMode,
-    requireAdapter,
-    selectedAnnotation,
-    setDialogOpen: setTranscribeDialogOpen,
-    setOperationBusy,
-    setOperationBusyState,
-    setOverlayMode,
-    setStatusMessage,
-    transcribeSelection,
     windowId,
   });
 
@@ -662,6 +705,7 @@ export function ScribeCompanionWindow({
     handleSave,
     localPage,
     pushHistory,
+    recordOperation,
     selectedAnnotation,
     selectAnnotation,
     serverPage,
@@ -676,14 +720,18 @@ export function ScribeCompanionWindow({
   /** @param {string} annotationId */
   function handleDelete(annotationId) {
     if (!localPage || editingIsBlocked()) return;
+    const deleted = (localPage.items || []).find((annotation) => annotation?.id === annotationId) || null;
     const result = applyAdapterMutationToPage(localPage, { annotationId, operation: 'delete' });
     const nextPage = result.page;
     pushHistory(nextPage);
+    recordOperation('delete');
     const nextSelection = selectionAfterPageTransform(localPage, nextPage, [annotationId]);
     setFocusedWordAnnotationId('');
     if (nextSelection) {
       preferredSelectionRef.current = nextSelection;
       selectAnnotation(windowId, nextSelection);
+      const kind = deleted && isWordAnnotation(deleted) ? 'Word' : 'Line';
+      setStatusMessage(`${kind} deleted. Undo restores it; Save to persist.`);
     }
     else setStatusMessage('The page is empty. Draw a line to continue editing.');
   }
@@ -716,13 +764,14 @@ export function ScribeCompanionWindow({
       };
     const word = createDraftWordAnnotation(canvasId, wordBBox, localPage.id || '');
     pushHistory(upsertAnnotationInPage(localPage, word));
+    recordOperation('word-create');
     if (word.id) {
       setFocusedWordAnnotationId(word.id);
       selectAnnotation(windowId, word.id);
     }
     setDrawMode(false);
     setOverlayMode('edit');
-    setStatusMessage('Draft word created. Save to persist it.');
+    setStatusMessage('Draft word created. Type its text, then use the Move handle or Arrow keys to place its box. Save to persist it.');
   }
 
   async function handleExplode() {
@@ -730,7 +779,7 @@ export function ScribeCompanionWindow({
     const targetCanvasId = canvasId || annotationCanvasId(selectedLineAnnotation);
     if (!targetCanvasId) return;
     setOperationBusy(true);
-    setStatusMessage('Exploding line into words...');
+    setStatusMessage('Splitting line into words...');
     try {
       const submittedPage = localPage;
       const selectedIds = [selectedLineAnnotation.id];
@@ -743,13 +792,14 @@ export function ScribeCompanionWindow({
         selectedIds,
         { atomic: true },
       );
+      recordOperation('split-words', targetCanvasId);
       if (activeCanvasRef.current !== targetCanvasId) return;
       setStatusMessage(overlap
         ? 'Words created, but a newer overlapping edit was preserved. Review the pending conflict.'
-        : 'Words created.');
+        : 'Words created. Click any word on the image to correct it.');
     } catch (error) {
       if (activeCanvasRef.current === targetCanvasId) {
-        setStatusMessage(error instanceof Error ? error.message : 'Explode failed.');
+        setStatusMessage(error instanceof Error ? error.message : 'Split to words failed.');
       }
     } finally {
       setOperationBusy(false);
@@ -759,6 +809,7 @@ export function ScribeCompanionWindow({
   function handleUndo() {
     if (editingIsBlocked()) return;
     dispatchSession({ type: 'undo' });
+    recordOperation('undo');
   }
 
   function handleRedo() {
@@ -770,6 +821,7 @@ export function ScribeCompanionWindow({
         .filter(Boolean),
     );
     const nextCache = dispatchSession({ type: 'redo' });
+    recordOperation('redo');
     const nextPage = editorSessionForCanvas(nextCache, canvasId).draftPage;
     const restoredAnnotations = (Array.isArray(nextPage?.items) ? nextPage.items : [])
       .filter((annotation) => annotation?.id && !previousAnnotationIds.has(annotation.id));
@@ -786,6 +838,7 @@ export function ScribeCompanionWindow({
       annotations={annotations}
       batchTranscriptionActive={batchTranscriptionActive}
       canSplitToWords={canSplitToWords}
+      deleteTarget={deleteTarget}
       drawMode={drawMode}
       id={id}
       isBusy={isBusy}
@@ -794,20 +847,13 @@ export function ScribeCompanionWindow({
       onAddWord={handleAddWord}
       onCreateCenteredLine={createCenteredLine}
       onCreateLine={toggleDrawMode}
-      onCycleOverlayMode={cycleOverlayModeFromToolbar}
       onExplode={handleExplode}
       onRedo={handleRedo}
       onPublish={handlePublish}
       onReload={() => reloadAnnotations()}
+      onReprocess={requestReprocess}
       onSave={handleSave}
-      onTranscribe={handleTranscribe}
-      onTranscribeDialogClose={() => setTranscribeDialogOpen(false)}
-      onTranscribeDialogOpen={() => {
-        if (!foregroundTranscriptionIsBlocked() && !isBusy && hasPageLines) {
-          setTranscribeDialogOpen(true);
-        }
-      }}
-      onTranscribeSelectionChange={setTranscribeSelection}
+      onSelectOverlayMode={selectOverlayMode}
       onUndo={handleUndo}
       pendingRemoteIds={session.pendingRemoteIds}
       saveDisabled={saveDisabled}
@@ -816,9 +862,6 @@ export function ScribeCompanionWindow({
       selectedGranularity={selectedGranularity}
       statusMessage={statusMessage}
       structuralEdits={structuralEdits}
-      transcribeDialogOpen={transcribeDialogOpen}
-      transcribeSelection={transcribeSelection}
-      visibleAnnotations={visibleAnnotations}
       windowId={windowId}
     />
   );

@@ -14,11 +14,20 @@ function client() {
 
 export type AnnotationPage = CanonicalIIIFAnnotationPage;
 
+export interface AnnotationCorrectionMetric {
+  levenshteinDistance: number;
+  baselineCharacters: number;
+  correctedCharacters: number;
+}
+
 export interface AnnotationPageSnapshot {
   page: AnnotationPage;
   revision: string;
   updatedAt: string;
   canvasUri: string;
+  // Server-derived distance from the OCR baseline; only a save response
+  // carries it, and only when the image has an OCR run.
+  correction?: AnnotationCorrectionMetric | null;
 }
 
 export class AnnotationRevisionConflictError extends Error {
@@ -80,6 +89,13 @@ export async function saveAnnotationPage(
     });
     return {
       canvasUri: resp.canvasUri,
+      correction: resp.correction
+        ? {
+          baselineCharacters: resp.correction.baselineCharacters,
+          correctedCharacters: resp.correction.correctedCharacters,
+          levenshteinDistance: resp.correction.levenshteinDistance,
+        }
+        : null,
       page: parseAnnotationPage(resp.annotationPageJson),
       revision: resp.revision.toString(),
       updatedAt: resp.updatedAt,

@@ -22,6 +22,10 @@
   deferred and is not a CI, deployment, or release gate.
 - Production apply requires the protected `production` environment.
 
+The shared CI workflow scopes cancellation to its caller workflow and source
+ref. Preview checks for a merged commit cannot cancel production checks for
+that same commit.
+
 Terraform receives the exact reviewed Git commit as the Compose source ref.
 Backend and frontend images come directly from build-produced immutable
 digests; OCR images are either built for that commit or carried forward by

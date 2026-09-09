@@ -1,6 +1,7 @@
 {
   "extends": "../tsconfig.json",
   "compilerOptions": {
+    "allowJs": true,
     "types": ["node", "@playwright/test"]
   },
   "include": ["./*.browser.ts", "../playwright.config.ts"]

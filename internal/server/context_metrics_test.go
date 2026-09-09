@@ -111,6 +111,9 @@ func TestSaveAnnotationPageCommitsCorrectionMetricWithCanonicalRevision(t *testi
 	if corrected.CanonicalRevision == nil || *corrected.CanonicalRevision != saved.Msg.GetRevision() || corrected.LevenshteinDistance != 1 {
 		t.Fatalf("committed canonical metric = revision %v distance %d, want revision %d distance 1", corrected.CanonicalRevision, corrected.LevenshteinDistance, saved.Msg.GetRevision())
 	}
+	if got := saved.Msg.GetCorrection(); got == nil || got.GetLevenshteinDistance() != 1 || got.GetBaselineCharacters() != 3 || got.GetCorrectedCharacters() != 3 {
+		t.Fatalf("save response correction metric = %v, want distance 1 over 3 baseline and 3 corrected characters", got)
+	}
 	aggregate, err := runStore.GetContextMetrics(ctx, workspaceID, processingContext.ID)
 	if err != nil {
 		t.Fatalf("load committed context metric: %v", err)

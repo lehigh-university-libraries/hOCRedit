@@ -21,6 +21,7 @@ import {
  * @property {(targetCanvasId?: string) => boolean} editingIsBlocked
  * @property {string} focusedWordAnnotationId
  * @property {IIIFAnnotationPage | null} localPage
+ * @property {(kind: import('../types/scribe').EditOperationKind, targetCanvasId?: string) => void} [recordOperation]
  * @property {(targetCanvasId: string) => ScribeAdapterLike} requireAdapter
  * @property {IIIFAnnotation | null} selectedLineAnnotation
  * @property {EditorRow | null} selectedRow
@@ -51,6 +52,7 @@ export function useStructuralEdits({
   editingIsBlocked,
   focusedWordAnnotationId,
   localPage,
+  recordOperation = () => {},
   requireAdapter,
   selectedLineAnnotation,
   selectedRow,
@@ -89,6 +91,7 @@ export function useStructuralEdits({
   /**
    * @param {{
    *   failureMessage: string,
+   *   operation: import('../types/scribe').EditOperationKind,
    *   pendingMessage: string,
    *   selectedIds: string[],
    *   successMessage: string,
@@ -97,6 +100,7 @@ export function useStructuralEdits({
    */
   async function runTransform({
     failureMessage,
+    operation,
     pendingMessage,
     selectedIds,
     successMessage,
@@ -122,6 +126,7 @@ export function useStructuralEdits({
         selectedIds,
         { atomic: true },
       );
+      recordOperation(operation, targetCanvasId);
       if (activeCanvasRef.current === targetCanvasId) {
         setStatusMessage(overlap
           ? `${successMessage}, but a newer overlapping edit was preserved. Review the pending conflict.`
@@ -146,6 +151,7 @@ export function useStructuralEdits({
       || splitAtWord >= splitTokens.length) return false;
     return runTransform({
       failureMessage: 'Split failed.',
+      operation: 'split-line',
       pendingMessage: 'Splitting line...',
       selectedIds: [selectedLineId],
       successMessage: 'Line split',
@@ -163,6 +169,7 @@ export function useStructuralEdits({
     if (!selectedIds.includes(selectedLineId) || selectedIds.length < 2) return false;
     return runTransform({
       failureMessage: 'Join lines failed.',
+      operation: 'join-lines',
       pendingMessage: 'Joining selected lines...',
       selectedIds,
       successMessage: 'Lines joined',
@@ -176,6 +183,7 @@ export function useStructuralEdits({
     if (selectedIds.length < 2) return false;
     return runTransform({
       failureMessage: 'Join words failed.',
+      operation: 'join-words',
       pendingMessage: 'Joining selected words...',
       selectedIds,
       successMessage: 'Words joined',

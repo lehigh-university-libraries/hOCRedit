@@ -88,7 +88,11 @@ export function commonViewerOptions(
   Adapter: ScribeAnnotationAdapterConstructor,
   client: ScribeAnnotationClient,
   runtimeForCanvas: (canvasID: string) => CanvasAdapterRuntime,
-  osdConfig: { crossOriginPolicy: string; ajaxWithCredentials: boolean },
+  osdConfig: {
+    crossOriginPolicy: string;
+    ajaxWithCredentials: boolean;
+    gestureSettingsMouse?: { clickToZoom: boolean; dblClickToZoom: boolean };
+  },
   bottomPaneHeight = 320,
 ) {
   const normalizedBottomPaneHeight = Number.isFinite(bottomPaneHeight)

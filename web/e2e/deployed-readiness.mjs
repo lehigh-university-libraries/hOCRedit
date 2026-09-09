@@ -6,7 +6,7 @@ import {
   productionSessionUserIsNonAdmin,
   protoJSONRepeatedField,
 } from "./deployed-readiness-protojson.mjs";
-import { waitForActionByValue } from "./deployed-readiness-dom.mjs";
+import { assertResponsiveEditorGeometry, waitForActionByValue, waitForSavedPage } from "./deployed-readiness-dom.mjs";
 import { exactStructuralSnapshot } from "./deployed-readiness-structure.mjs";
 import {
   classifyDurableUploadFailure,
@@ -71,6 +71,7 @@ const productionReadinessManifestURLs = new Set([manifestURL, legacyManifestURL]
 const readinessManifestImageSHA256 = "0443cf4f28c60debf3237300d3357539b3b309f8c950af489491c686a13e0e16";
 const productionStorageStatePath = "/tmp/scribe-browser-session-state.json";
 const centeredLineAccessibleName = "Add a line at the viewport center and focus its keyboard resize handle";
+const reprocessAccessibleName = "Re-segment and retranscribe the whole page with the selected processing context";
 const deterministicLineText = "browser readiness alpha beta gamma";
 const deterministicWordTexts = Object.freeze([...deterministicLineText.split(" "), "epsilon"]);
 const deterministicJoinedLineText = deterministicWordTexts.join(" ");
@@ -160,17 +161,6 @@ function manifestFailureExitCode(substage) {
     ?? sharedManifestFailureExitCode(substage);
 }
 
-function bottomPaneHeightForViewport({ height, width }) {
-  const viewportHeight = Number.isFinite(height) ? Math.max(0, Math.floor(height)) : 0;
-  const viewportWidth = Number.isFinite(width) ? Math.max(0, Math.floor(width)) : 0;
-  const shortViewport = viewportHeight < 420;
-  const desiredPaneHeight = shortViewport ? 300 : viewportWidth <= 900 ? 420 : 320;
-  const minimumCanvasHeight = shortViewport ? 72 : viewportWidth <= 480 ? 170 : 220;
-  return Math.min(
-    desiredPaneHeight,
-    Math.max(0, viewportHeight - minimumCanvasHeight - 60),
-  );
-}
 
 function configuredBrowserMode() {
   const mode = String(process.env.SCRIBE_BROWSER_MODE ?? "").trim();
@@ -1995,6 +1985,31 @@ async function waitForOverlayMarkersDisabled() {
   await page.waitForFunction(() => document.querySelector("[data-scribe-granularity]") === null);
 }
 
+async function selectOverlayMode(label) {
+  const toggle = page.getByRole("button", { name: `${label} overlay`, exact: true });
+  await toggle.click();
+  await page.waitForFunction((name) => (
+    document.querySelector(`[aria-label="Overlay mode"] button[aria-label="${name} overlay"]`)?.getAttribute("aria-pressed") === "true"
+  ), label);
+}
+
+// Every overlay mode is one exclusive choice in the mode switch. Walk through
+// all of them and finish with the overlay off so later stages start from the
+// image alone.
+async function cycleOverlayModes() {
+  await selectOverlayMode("Edit");
+  await page.locator(".scribe-text-overlay").waitFor({ state: "visible" });
+  await waitForOverlayLineMarkers();
+  await selectOverlayMode("Read");
+  await waitForOverlayLineMarkers();
+  await selectOverlayMode("Outline");
+  await waitForOverlayLineMarkers();
+  await selectOverlayMode("Transcript");
+  await page.locator('[data-scribe-transcript-pane="true"]').waitFor({ state: "visible" });
+  await selectOverlayMode("Off");
+  await waitForOverlayMarkersDisabled();
+}
+
 async function selectAllAdditionalCandidates(dialog, candidatePattern) {
   const candidates = dialog.getByRole("button", { name: candidatePattern });
   const count = await candidates.count();
@@ -2110,98 +2125,6 @@ async function navigate(path, requireHealthy = true) {
   if (requireHealthy) assertBrowserHealthy();
 }
 
-async function assertResponsiveEditorGeometry(width, height, minimumImageHeight) {
-  const deadline = Date.now() + 10_000;
-  do {
-    const geometry = await page.locator('[data-scribe-action-panel="true"]').evaluate((panel) => {
-      const parent = panel.parentElement;
-      const companion = parent?.parentElement;
-      const viewer = document.getElementById("mirador-viewer");
-      const osd = viewer?.querySelector(".openseadragon-canvas");
-      const panelBounds = panel.getBoundingClientRect();
-      const parentBounds = parent?.getBoundingClientRect();
-      const viewerBounds = viewer?.getBoundingClientRect();
-      const osdBounds = osd?.getBoundingClientRect();
-      const osdCanvases = osd instanceof HTMLCanvasElement
-        ? [osd]
-        : Array.from(osd?.querySelectorAll("canvas") ?? []);
-      const actionGroups = [
-        panel.querySelector('[role="group"][aria-label="View and modes"]'),
-        panel.querySelector('[role="group"][aria-label="Text and page actions"]'),
-      ];
-      const primaryActions = actionGroups.flatMap((group) => (
-        Array.from(group?.querySelectorAll("button[aria-label]") ?? [])
-      ));
-      const primaryActionsVisible = primaryActions.every((button) => {
-        const bounds = button.getBoundingClientRect();
-        const style = getComputedStyle(button);
-        return bounds.width > 0
-          && bounds.height > 0
-          && bounds.left >= Math.max(0, panelBounds.left) - 1
-          && bounds.right <= Math.min(window.innerWidth, panelBounds.right) + 1
-          && bounds.top >= Math.max(0, panelBounds.top) - 1
-          && bounds.bottom <= Math.min(window.innerHeight, panelBounds.bottom) + 1
-          && style.display !== "none"
-          && style.visibility !== "hidden";
-      });
-      return {
-        companionHeight: companion?.getBoundingClientRect().height ?? 0,
-        osdHasPixels: osdCanvases.some((canvas) => canvas.width > 0 && canvas.height > 0),
-        osdImageHeight: osdBounds?.height ?? 0,
-        pageOverflow: document.documentElement.scrollWidth > window.innerWidth
-          || document.documentElement.scrollHeight > window.innerHeight,
-        panelClientHeight: panel.clientHeight,
-        panelClientWidth: panel.clientWidth,
-        panelScrollTop: panel.scrollTop,
-        panelScrollWidth: panel.scrollWidth,
-        parentClientHeight: parent?.clientHeight ?? 0,
-        parentClientWidth: parent?.clientWidth ?? 0,
-        parentScrollTop: parent?.scrollTop ?? 0,
-        parentScrollWidth: parent?.scrollWidth ?? 0,
-        panelWithinParent: Boolean(parentBounds)
-          && panelBounds.top >= parentBounds.top - 1
-          && panelBounds.bottom <= parentBounds.bottom + 1,
-        panelWithinViewer: Boolean(viewerBounds)
-          && panelBounds.top >= viewerBounds.top - 1
-          && panelBounds.bottom <= viewerBounds.bottom + 1,
-        primaryActionCount: primaryActions.length,
-        primaryActionsVisible,
-        viewerClientHeight: viewer?.clientHeight ?? 0,
-        viewerClientWidth: viewer?.clientWidth ?? 0,
-        viewportHeight: window.innerHeight,
-        viewportWidth: window.innerWidth,
-      };
-    });
-    const expectedPaneHeight = bottomPaneHeightForViewport({
-      height: geometry.viewerClientHeight,
-      width: geometry.viewerClientWidth,
-    });
-    if (
-      !geometry.pageOverflow
-      && geometry.viewportWidth === width
-      && geometry.viewportHeight === height
-      && geometry.viewerClientHeight >= Math.min(500, height - 180)
-      && geometry.panelClientHeight > 0
-      && geometry.parentClientHeight > 0
-      && Math.abs(geometry.panelClientHeight - geometry.parentClientHeight) <= 2
-      && geometry.panelClientWidth > 0
-      && geometry.parentClientWidth > 0
-      && geometry.panelScrollTop === 0
-      && geometry.parentScrollTop === 0
-      && geometry.panelScrollWidth <= geometry.panelClientWidth + 1
-      && geometry.parentScrollWidth <= geometry.parentClientWidth + 1
-      && geometry.panelWithinParent
-      && geometry.panelWithinViewer
-      && geometry.primaryActionCount === 14
-      && geometry.primaryActionsVisible
-      && geometry.osdHasPixels
-      && geometry.osdImageHeight >= minimumImageHeight
-      && Math.abs(geometry.companionHeight - expectedPaneHeight) <= 1
-    ) return;
-    await page.waitForTimeout(100);
-  } while (Date.now() < deadline);
-  throw new Error("editor action panel geometry failed");
-}
 
 try {
   const mainScenarioWatchdog = new Promise((_, reject) => {
@@ -3107,19 +3030,26 @@ try {
   category = "editor";
   await page.locator("#mirador-viewer").waitFor({ state: "visible" });
   await page.getByRole("heading", { name: "Editor", exact: true }).waitFor({ state: "visible" });
-  for (const name of ["Overlay off", "Retranscribe", "Save", "Publish edits"]) {
+  for (const name of [
+    "Edit overlay",
+    "Read overlay",
+    "Transcript overlay",
+    reprocessAccessibleName,
+    "Save",
+    "Publish edits",
+  ]) {
     await page.getByRole("button", { name, exact: true }).waitFor({ state: "visible" });
   }
   const textActions = page.getByRole("group", { name: "Text and page actions", exact: true });
   const editorActionButtons = textActions.locator("button");
-  const editorDelete = page.getByRole("button", { name: "Delete", exact: true });
+  const editorDelete = page.getByRole("button", { name: /^Delete the (line|word)/ });
   const editorDeleteState = {
     className: await editorDelete.getAttribute("class") ?? "",
     iconCount: await editorDelete.locator("svg").count(),
     lastLabel: await editorActionButtons.last().getAttribute("aria-label") ?? "",
   };
   if (
-    editorDeleteState.lastLabel !== "Delete"
+    !editorDeleteState.lastLabel.startsWith("Delete the ")
     || !editorDeleteState.className.includes("MuiButton-containedError")
     || editorDeleteState.iconCount !== 1
   ) {
@@ -3127,27 +3057,31 @@ try {
   }
 
   category = "overlay";
-  await page.getByRole("button", { name: "Overlay off", exact: true }).click();
-  await page.getByRole("button", { name: "Edit overlay", exact: true }).waitFor({ state: "visible" });
-  await page.locator(".scribe-text-overlay").waitFor({ state: "visible" });
-  await waitForOverlayLineMarkers();
-  await page.getByRole("button", { name: "Edit overlay", exact: true }).click();
-  await page.getByRole("button", { name: "Read overlay", exact: true }).click();
-  await page.getByRole("button", { name: "Outline overlay", exact: true }).click();
-  await page.getByRole("button", { name: "Overlay off", exact: true }).waitFor({ state: "visible" });
-  await waitForOverlayMarkersDisabled();
+  await cycleOverlayModes();
   assertBrowserHealthy();
 
   category = "retranscribe";
+  // Line-level foreground retranscription no longer exists. The only repeat
+  // transcription path is a whole-page reprocess with a chosen context, which
+  // is exercised end to end by the manifest stage. Here the editor must offer
+  // it without ever touching the foreground enrichment RPC.
   if (enrichAnnotationRequestCount !== 0) {
     throw new Error("automatic transcription used the foreground enrichment path");
   }
-  await page.getByRole("button", { name: "Retranscribe", exact: true }).click();
-  const transcribeDialog = page.getByRole("dialog").filter({ hasText: "entire page" });
-  await transcribeDialog.waitFor({ state: "visible" });
-  await transcribeDialog.getByRole("button", { name: /entire page/i }).click();
-  await page.getByText("Document retranscribed. Save to persist this draft.", { exact: true }).waitFor({ state: "visible" });
-  if (enrichAnnotationRequestCount < 1) throw new Error("manual retranscription omitted foreground enrichment");
+  await page.getByRole("button", { name: reprocessAccessibleName, exact: true }).waitFor({ state: "visible" });
+  await page.waitForFunction(() => {
+    const select = document.getElementById("reprocess-context");
+    return select instanceof HTMLSelectElement
+      && !select.disabled
+      && select.value === "0"
+      && (select.options[0]?.textContent || "").startsWith("Current: ");
+  });
+  if (await page.getByRole("dialog").count() !== 0) {
+    throw new Error("reprocess control opened an unexpected dialog");
+  }
+  if (enrichAnnotationRequestCount !== 0) {
+    throw new Error("reprocess control used the foreground enrichment path");
+  }
   assertBrowserHealthy();
 
   category = "structure";
@@ -3299,7 +3233,7 @@ try {
     "/scribe.v1.AnnotationService/SaveAnnotationPage",
     () => saveButton.click(),
   );
-  await page.getByText("Saved page.", { exact: true }).waitFor({ state: "visible" });
+  await waitForSavedPage(page);
   const savedAnnotationSnapshot = await loadCanonicalAnnotationSnapshot(itemImageID, workspaceID);
   assertTextualAnnotationPage(savedAnnotationSnapshot.page);
   assertSavedStructuralPage(savedAnnotationSnapshot.page, expectedSavedStructure);
@@ -3341,6 +3275,7 @@ try {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     await assertOpenSeadragonCanvas();
     await assertResponsiveEditorGeometry(
+      page,
       viewport.width,
       viewport.height,
       viewport.minimumImageHeight,
@@ -3613,21 +3548,13 @@ try {
   }
 
   manifestFailureSubstage = "second-overlay";
-  const manifestRetranscribe = page.getByRole("button", { name: "Retranscribe", exact: true });
+  const manifestRetranscribe = page.getByRole("button", { name: reprocessAccessibleName, exact: true });
   await manifestRetranscribe.waitFor({ state: "visible" });
-  await page.waitForFunction(() => {
-    const retranscribe = document.querySelector('button[aria-label="Retranscribe"]');
+  await page.waitForFunction((name) => {
+    const retranscribe = document.querySelector(`button[aria-label="${name}"]`);
     return retranscribe instanceof HTMLButtonElement && !retranscribe.disabled;
-  });
-  await page.getByRole("button", { name: "Overlay off", exact: true }).click();
-  await page.getByRole("button", { name: "Edit overlay", exact: true }).waitFor({ state: "visible" });
-  await page.locator(".scribe-text-overlay").waitFor({ state: "visible" });
-  await waitForOverlayLineMarkers();
-  await page.getByRole("button", { name: "Edit overlay", exact: true }).click();
-  await page.getByRole("button", { name: "Read overlay", exact: true }).click();
-  await page.getByRole("button", { name: "Outline overlay", exact: true }).click();
-  await page.getByRole("button", { name: "Overlay off", exact: true }).waitFor({ state: "visible" });
-  await waitForOverlayMarkersDisabled();
+  }, reprocessAccessibleName);
+  await cycleOverlayModes();
   if (!await manifestRetranscribe.isEnabled()) {
     throw new Error("manifest editor action was unusable after overlay cycling");
   }

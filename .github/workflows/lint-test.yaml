@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ inputs.checkout_ref != '' && inputs.checkout_ref || github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.workflow }}-${{ inputs.checkout_ref != '' && inputs.checkout_ref || github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:

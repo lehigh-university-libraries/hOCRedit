@@ -58,11 +58,55 @@ export interface CanonicalIIIFAnnotationPage extends IIIFAnnotationPage {
   items: IdentifiedIIIFAnnotation[];
 }
 
+/**
+ * Server-derived distance between a committed page and the OCR baseline of
+ * its item image. Present on a save response only when a baseline exists.
+ */
+export interface AnnotationCorrectionMetric {
+  levenshteinDistance: number;
+  baselineCharacters: number;
+  correctedCharacters: number;
+}
+
 export interface AnnotationPageSnapshot {
   page: CanonicalIIIFAnnotationPage;
   revision: string;
   updatedAt?: string;
+  correction?: AnnotationCorrectionMetric | null;
 }
+
+export type ScribeOverlayMode = 'none' | 'edit' | 'read' | 'outline' | 'transcript';
+
+/** Browser-side summary of how a draft differs from its base page. */
+export interface PageEditMetrics {
+  /** Sum over changed lines; null when an exact diff exceeds the browser cost budget. */
+  characterDistance: number | null;
+  changedAnnotationIds: string[];
+  boxesMoved: number;
+  boxesResized: number;
+  linesAdded: number;
+  linesDeleted: number;
+  linesRetyped: number;
+  wordsAdded: number;
+  wordsDeleted: number;
+  wordsRetyped: number;
+}
+
+export type EditOperationKind =
+  | 'box-move'
+  | 'box-resize'
+  | 'delete'
+  | 'join-lines'
+  | 'join-words'
+  | 'line-create'
+  | 'redo'
+  | 'split-line'
+  | 'split-words'
+  | 'text-edit'
+  | 'undo'
+  | 'word-create';
+
+export type EditOperationCounts = Partial<Record<EditOperationKind, number>>;
 
 export interface ImageBBox {
   x: number;
@@ -460,5 +504,33 @@ export interface ScribeTranscriptionJobStateEventDetail {
   canvasId: string;
   itemImageId: string;
   message: string;
+  windowId: string;
+}
+
+/**
+ * Emitted after every successful page save. `metrics` compares the saved
+ * page with the base revision it replaced, `operations` counts the editor
+ * interactions since the previous save, and `correction` is the server's
+ * baseline distance when the image has an OCR run.
+ */
+export interface ScribeEditMetricsEventDetail {
+  canvasId: string;
+  correction: AnnotationCorrectionMetric | null;
+  itemImageId: string;
+  metrics: PageEditMetrics;
+  operations: EditOperationCounts;
+  revision: string;
+  summary: string;
+  windowId: string;
+}
+
+/**
+ * Asks the shell to re-segment and retranscribe the whole item image with the
+ * processing context the shell currently has selected. Line-level foreground
+ * retranscription is intentionally not offered.
+ */
+export interface ScribeReprocessRequestEventDetail {
+  canvasId: string;
+  itemImageId: string;
   windowId: string;
 }
