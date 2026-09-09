@@ -54,7 +54,8 @@ export function useAnnotationMutationBridge({
       });
       return;
     }
-    if (!detail.operation) {
+    const operation = detail.operation;
+    if (operation !== 'create' && operation !== 'update' && operation !== 'delete') {
       detail.respond({ error: new Error('Annotation mutation requires an operation.') });
       return;
     }
@@ -62,7 +63,7 @@ export function useAnnotationMutationBridge({
       const result = applyAdapterMutationToPage(targetSession.draftPage, {
         annotation: detail.annotation,
         annotationId: detail.annotationId,
-        operation: detail.operation,
+        operation,
       });
       const nextCache = dispatchSessionForCanvas(canvasId, { page: result.page, type: 'edit' });
       const nextSession = editorSessionForCanvas(nextCache, canvasId);

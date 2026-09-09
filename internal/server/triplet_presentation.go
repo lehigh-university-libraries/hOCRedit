@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	htrmetrics "github.com/lehigh-university-libraries/htr/pkg/metrics"
 	"github.com/lehigh-university-libraries/scribe/internal/config"
@@ -500,14 +501,18 @@ func (h *Handler) currentAnnotationPage(ctx context.Context, itemImageID uint64)
 	return h.annotations.LoadPage(ctx, h.currentWorkspaceID(ctx), itemImageID)
 }
 
-func (h *Handler) saveCanonicalAnnotationPage(ctx context.Context, itemImageID uint64, raw string, expectedRevision uint64) (store.AnnotationPage, error) {
+// saveCanonicalAnnotationPage commits one complete page against the expected
+// revision and returns the correction metric recorded with it. The metric is
+// nil for pages that have no OCR baseline or that were created rather than
+// corrected.
+func (h *Handler) saveCanonicalAnnotationPage(ctx context.Context, itemImageID uint64, raw string, expectedRevision uint64) (store.AnnotationPage, *store.AnnotationCorrectionMetric, error) {
 	image, err := h.itemImageForRequest(ctx, itemImageID)
 	if err != nil {
-		return store.AnnotationPage{}, store.ErrAnnotationPageResource
+		return store.AnnotationPage{}, nil, store.ErrAnnotationPageResource
 	}
 	canvasURI := strings.TrimSpace(image.CanvasURI)
 	if canvasURI == "" {
-		return store.AnnotationPage{}, store.ErrAnnotationPageResource
+		return store.AnnotationPage{}, nil, store.ErrAnnotationPageResource
 	}
 	identity := iiif.PageIdentity{
 		PublicBaseURL: h.publicAnnotationBaseURL(),
@@ -516,7 +521,7 @@ func (h *Handler) saveCanonicalAnnotationPage(ctx context.Context, itemImageID u
 	}
 	normalized, err := iiif.NormalizeAnnotationPage([]byte(raw), identity)
 	if err != nil {
-		return store.AnnotationPage{}, fmt.Errorf("%w: %v", errInvalidAnnotationPage, err)
+		return store.AnnotationPage{}, nil, fmt.Errorf("%w: %v", errInvalidAnnotationPage, err)
 	}
 	// A line and its word annotations are two views of one correction. Resolve
 	// whichever side the editor changed before persistence so reload, public
@@ -524,40 +529,40 @@ func (h *Handler) saveCanonicalAnnotationPage(ctx context.Context, itemImageID u
 	if expectedRevision > 0 {
 		current, loadErr := h.annotations.LoadPage(ctx, h.currentWorkspaceID(ctx), itemImageID)
 		if loadErr != nil {
-			return store.AnnotationPage{}, loadErr
+			return store.AnnotationPage{}, nil, loadErr
 		}
 		var currentDocument, proposedDocument map[string]any
 		if err := iiif.DecodeJSON([]byte(current.Payload), &currentDocument); err != nil {
-			return store.AnnotationPage{}, fmt.Errorf("decode current canonical page: %w", err)
+			return store.AnnotationPage{}, nil, fmt.Errorf("decode current canonical page: %w", err)
 		}
 		if err := iiif.DecodeJSON(normalized, &proposedDocument); err != nil {
-			return store.AnnotationPage{}, fmt.Errorf("decode proposed canonical page: %w", err)
+			return store.AnnotationPage{}, nil, fmt.Errorf("decode proposed canonical page: %w", err)
 		}
 		currentItems, currentOK := currentDocument["items"].([]any)
 		proposedItems, proposedOK := proposedDocument["items"].([]any)
 		if !currentOK || !proposedOK {
-			return store.AnnotationPage{}, fmt.Errorf("%w: canonical page items must be an array", errInvalidAnnotationPage)
+			return store.AnnotationPage{}, nil, fmt.Errorf("%w: canonical page items must be an array", errInvalidAnnotationPage)
 		}
 		reconciledItems, reconcileErr := reconcileEditedLineWords(currentItems, proposedItems, identity, expectedRevision)
 		if reconcileErr != nil {
-			return store.AnnotationPage{}, fmt.Errorf("%w: reconcile line and word annotations: %v", errInvalidAnnotationPage, reconcileErr)
+			return store.AnnotationPage{}, nil, fmt.Errorf("%w: reconcile line and word annotations: %v", errInvalidAnnotationPage, reconcileErr)
 		}
 		proposedDocument["items"] = reconciledItems
 		reconciled, marshalErr := json.Marshal(proposedDocument)
 		if marshalErr != nil {
-			return store.AnnotationPage{}, fmt.Errorf("encode reconciled canonical page: %w", marshalErr)
+			return store.AnnotationPage{}, nil, fmt.Errorf("encode reconciled canonical page: %w", marshalErr)
 		}
 		normalized, err = iiif.NormalizeAnnotationPage(reconciled, identity)
 		if err != nil {
-			return store.AnnotationPage{}, fmt.Errorf("%w: %v", errInvalidAnnotationPage, err)
+			return store.AnnotationPage{}, nil, fmt.Errorf("%w: %v", errInvalidAnnotationPage, err)
 		}
 	}
 	if err := iiif.ValidateAnnotationPageGeometry(normalized, image.Width, image.Height); err != nil {
-		return store.AnnotationPage{}, fmt.Errorf("%w: %v", errInvalidAnnotationPage, err)
+		return store.AnnotationPage{}, nil, fmt.Errorf("%w: %v", errInvalidAnnotationPage, err)
 	}
 	pageID, err := h.annotationPageIDForItemImage(itemImageID)
 	if err != nil {
-		return store.AnnotationPage{}, err
+		return store.AnnotationPage{}, nil, err
 	}
 	userID := h.currentUserID(ctx)
 	page := store.AnnotationPage{
@@ -575,26 +580,27 @@ func (h *Handler) saveCanonicalAnnotationPage(ctx context.Context, itemImageID u
 		case runErr == nil:
 			lines, _, _, conversionErr := annotationPageToHOCRLines(string(normalized))
 			if conversionErr != nil {
-				return store.AnnotationPage{}, fmt.Errorf("%w: cannot derive correction text: %v", errInvalidAnnotationPage, conversionErr)
+				return store.AnnotationPage{}, nil, fmt.Errorf("%w: cannot derive correction text: %v", errInvalidAnnotationPage, conversionErr)
 			}
+			baselineText := normalizeCorrectionMetricText(run.OriginalText)
+			correctedText := normalizeCorrectionMetricText(linesToPlainText(lines))
 			correctionMetric = &store.AnnotationCorrectionMetric{
-				LevenshteinDistance: htrmetrics.LevenshteinDistance(
-					normalizeCorrectionMetricText(run.OriginalText),
-					normalizeCorrectionMetricText(linesToPlainText(lines)),
-				),
+				LevenshteinDistance: htrmetrics.LevenshteinDistance(baselineText, correctedText),
+				BaselineCharacters:  utf8.RuneCountInString(baselineText),
+				CorrectedCharacters: utf8.RuneCountInString(correctedText),
 			}
 		case errors.Is(runErr, sql.ErrNoRows):
 			// Pages imported without an OCR run remain valid canonical resources;
 			// there is simply no model baseline against which to score them.
 		default:
-			return store.AnnotationPage{}, fmt.Errorf("load OCR baseline: %w", runErr)
+			return store.AnnotationPage{}, nil, fmt.Errorf("load OCR baseline: %w", runErr)
 		}
 	}
 	saved, err := h.annotations.SavePageWithCorrectionMetric(ctx, page, expectedRevision, correctionMetric)
 	if err != nil {
-		return store.AnnotationPage{}, err
+		return store.AnnotationPage{}, nil, err
 	}
-	return saved, nil
+	return saved, correctionMetric, nil
 }
 
 func normalizeCorrectionMetricText(value string) string {

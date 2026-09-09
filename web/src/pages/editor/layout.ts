@@ -8,12 +8,17 @@ export function renderEditorLayout(app: HTMLElement): void {
           <a id="brand-nav" href="/" class="text-lg font-bold tracking-tight">Scribe</a>
           <nav class="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
             <button id="home-nav" class="inline-flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-xs transition hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50">Home</button>
-            <button id="reprocess-nav" class="inline-flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-xs transition hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50">Resegment + retranscribe</button>
+            <label for="reprocess-context" class="sr-only">Processing context for reprocessing</label>
+            <select id="reprocess-context" aria-label="Processing context for reprocessing" class="h-9 max-w-56 rounded-md border border-input bg-background px-2 text-sm text-foreground shadow-xs" disabled>
+              <option value="0">Current context</option>
+            </select>
+            <button id="reprocess-nav" class="inline-flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-xs transition hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50" title="Re-segment the whole page and transcribe every line again with the selected context. Pending edits are saved first.">Reprocess page</button>
           </nav>
         </div>
         <div class="ml-auto text-right">
           <h1 class="text-xl font-bold">Editor</h1>
           <p id="editor-meta" class="text-xs text-muted-foreground"></p>
+          <p id="editor-edit-metrics" role="status" aria-live="polite" class="mt-1 text-xs text-muted-foreground"></p>
           <p id="editor-transcription-status" role="status" aria-live="polite" class="mt-1 text-xs text-destructive"></p>
         </div>
       </header>

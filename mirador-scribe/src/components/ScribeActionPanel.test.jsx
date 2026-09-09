@@ -7,6 +7,7 @@ import ScribeActionPanel, {
   actionPanelRootSx,
   actionPanelToolbarLayoutSx,
   compactToolbarActionSx,
+  shortcutLegendEntries,
   shortcutLegendSx,
   toolbarActionLabelSx,
 } from './ScribeActionPanel';
@@ -20,8 +21,7 @@ vi.mock('mirador', () => ({
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key) => ({
-      scribeEditorTranscribe: 'Retranscribe',
-      scribeEditorTranscribeSelected: 'Retranscribe selected',
+      scribeEditorReprocess: 'Reprocess Page',
     })[key] || key,
   }),
 }));
@@ -54,23 +54,21 @@ function props(overrides = {}) {
     batchTranscriptionActive: false,
     visibleAnnotations: [annotation],
     canSplitToWords: true,
+    deleteTarget: { granularity: 'line', id: annotation.id, text: 'one two three' },
     drawMode: false,
     id: 'companion-1',
     isBusy: false,
     onAddWord: noop,
     onCreateCenteredLine: noop,
     onCreateLine: noop,
-    onCycleOverlayMode: noop,
     onDelete: noop,
     onExplode: noop,
     onPublish: noop,
     onRedo: noop,
     onReload: noop,
+    onReprocess: noop,
     onSave: noop,
-    onTranscribe: noop,
-    onTranscribeDialogClose: noop,
-    onTranscribeDialogOpen: noop,
-    onTranscribeSelectionChange: noop,
+    onSelectOverlayMode: noop,
     onUndo: noop,
     overlayMode: 'none',
     pendingRemoteIds: [],
@@ -97,8 +95,6 @@ function props(overrides = {}) {
       splitTokens: ['one', 'two', 'three'],
       wordCandidates: [],
     },
-    transcribeDialogOpen: false,
-    transcribeSelection: [],
     windowId: 'window-1',
     ...overrides,
   };
@@ -159,8 +155,9 @@ describe('ScribeActionPanel', () => {
     expect(document.querySelector('button[aria-label="scribeEditorSplitLine"]')?.getAttribute('aria-keyshortcuts')).toBe('Alt+S');
     expect(document.querySelector('button[aria-label="scribeEditorJoinLines"]')?.getAttribute('aria-keyshortcuts')).toBe('Alt+L');
     expect(document.querySelector('button[aria-label="scribeEditorJoinWords"]')?.getAttribute('aria-keyshortcuts')).toBe('Alt+W');
-    expect(document.querySelector('button[aria-label="Retranscribe"]')?.getAttribute('aria-keyshortcuts')).toBe('Alt+R');
+    expect(document.querySelector('button[aria-label^="Re-segment and retranscribe"]')?.getAttribute('aria-keyshortcuts')).toBe('Alt+R');
     expect(document.querySelector('button[aria-label="Publish edits"]')?.getAttribute('aria-keyshortcuts')).toBe('Alt+P');
+    expect(document.querySelector('button[aria-label="Add a word annotation beside the selection"]')?.getAttribute('aria-keyshortcuts')).toBe('W');
   });
 
   it('renders shortcut keys as readable semantic keycaps without decorative bullets', async () => {
@@ -170,23 +167,64 @@ describe('ScribeActionPanel', () => {
     await act(async () => root.render(<ScribeActionPanel {...props()} />));
 
     const legend = document.querySelector('[aria-label="Keyboard shortcuts"]');
-    expect(legend?.querySelectorAll('li')).toHaveLength(11);
-    expect(legend?.querySelectorAll('kbd')).toHaveLength(11);
+    expect(legend?.querySelectorAll('li')).toHaveLength(shortcutLegendEntries.length);
+    expect(legend?.querySelectorAll('kbd')).toHaveLength(shortcutLegendEntries.length);
     expect(legend?.textContent).not.toContain('•');
     expect(legend?.textContent).toContain('Shift+TabPrev row');
     expect(legend?.textContent).toContain('Alt+PPublish');
+    expect(legend?.textContent).toContain('TTranscript pane');
+    expect(legend?.textContent).toContain('ArrowsNudge box');
   });
 
-  it('disables foreground retranscription while the durable job is active', async () => {
+  it('presents every overlay mode as one exclusive switch and reports the active mode', async () => {
+    const onSelectOverlayMode = vi.fn();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => root.render(<ScribeActionPanel {...props({
+      onSelectOverlayMode,
+      overlayMode: 'read',
+    })} />));
+
+    const modeSwitch = document.querySelector('[role="group"][aria-label="Overlay mode"]');
+    const modeButtons = [...(modeSwitch?.querySelectorAll('button') || [])];
+    expect(modeButtons.map((button) => button.getAttribute('aria-label'))).toEqual([
+      'Off overlay', 'Edit overlay', 'Read overlay', 'Outline overlay', 'Transcript overlay',
+    ]);
+    expect(modeButtons.map((button) => button.getAttribute('aria-pressed'))).toEqual([
+      'false', 'false', 'true', 'false', 'false',
+    ]);
+    expect(modeButtons[4]?.getAttribute('aria-keyshortcuts')).toBe('T');
+
+    await act(async () => modeButtons[4]?.click());
+    expect(onSelectOverlayMode).toHaveBeenCalledWith('transcript');
+    // Re-selecting a mode still records an explicit preference before OCR arrives.
+    await act(async () => modeButtons[2]?.click());
+    expect(onSelectOverlayMode).toHaveBeenLastCalledWith('read');
+  });
+
+  it('disables whole-page reprocessing while the durable job is active and while the page is empty', async () => {
+    const onReprocess = vi.fn();
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
     await act(async () => root.render(<ScribeActionPanel {...props({
       batchTranscriptionActive: true,
+      onReprocess,
     })} />));
 
-    expect(document.querySelector('button[aria-label="Retranscribe"]')?.disabled).toBe(true);
+    const reprocess = () => document.querySelector('button[aria-label^="Re-segment and retranscribe"]');
+    expect(reprocess()?.disabled).toBe(true);
     expect(document.querySelector('button[aria-label="Publish edits"]')?.disabled).toBe(false);
+
+    await act(async () => root.render(<ScribeActionPanel {...props({ annotations: [], onReprocess })} />));
+    expect(reprocess()?.disabled).toBe(true);
+
+    await act(async () => root.render(<ScribeActionPanel {...props({ onReprocess })} />));
+    expect(reprocess()?.disabled).toBe(false);
+    await act(async () => reprocess()?.click());
+    expect(onReprocess).toHaveBeenCalledOnce();
+    expect(document.body.textContent).not.toContain('Retranscribe selected');
   });
 
   it('puts the destructive trash action at the end of the sidebar toolbar', async () => {
@@ -198,47 +236,29 @@ describe('ScribeActionPanel', () => {
     const textActions = document.querySelector('[role="group"][aria-label="Text and page actions"]');
     const toolbarActions = [...textActions.querySelectorAll('button[aria-label]')];
     const deleteAction = toolbarActions.at(-1);
-    expect(deleteAction?.getAttribute('aria-label')).toBe('scribeEditorDelete');
+    expect(deleteAction?.getAttribute('aria-label')).toBe('Delete the line "one two three"');
     expect(deleteAction?.className).toContain('MuiButton-containedError');
     expect(deleteAction?.querySelector('[data-testid="DeleteOutlineIcon"]')).not.toBeNull();
   });
 
-  it('offers an explicit cancel action and never enables a word-only retranscription selection', async () => {
-    const onTranscribeDialogClose = vi.fn();
+  it('deletes the focused word rather than its line and disables deletion without a target', async () => {
+    const onDelete = vi.fn();
     const selectedWord = word();
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
     await act(async () => root.render(<ScribeActionPanel {...props({
       annotations: [line(), selectedWord],
-      onTranscribeDialogClose,
-      transcribeDialogOpen: true,
-      transcribeSelection: [selectedWord.id],
-      visibleAnnotations: [line(), selectedWord],
+      deleteTarget: { granularity: 'word', id: selectedWord.id, text: 'one' },
+      onDelete,
     })} />));
 
-    const buttons = [...document.querySelectorAll('button')];
-    const transcribeSelected = buttons.find((button) => button.textContent?.includes('Retranscribe selected'));
-    expect(transcribeSelected?.disabled).toBe(true);
+    const deleteAction = document.querySelector("button[aria-label='Delete the word \"one\"']");
+    expect(deleteAction?.textContent).toContain('Delete word');
+    await act(async () => deleteAction?.click());
+    expect(onDelete).toHaveBeenCalledWith(selectedWord.id);
 
-    const cancel = buttons.find((button) => button.textContent === 'Cancel');
-    expect(cancel).toBeDefined();
-    await act(async () => cancel?.click());
-    expect(onTranscribeDialogClose).toHaveBeenCalledOnce();
-  });
-
-  it('keeps whole-page retranscription available when no line is inside the viewport', async () => {
-    container = document.createElement('div');
-    document.body.appendChild(container);
-    root = createRoot(container);
-    await act(async () => root.render(<ScribeActionPanel {...props({
-      transcribeDialogOpen: true,
-      visibleAnnotations: [],
-    })} />));
-
-    const buttons = [...document.querySelectorAll('button')];
-    expect(buttons.find((button) => button.getAttribute('aria-label') === 'Retranscribe')?.disabled).toBe(false);
-    expect(buttons.find((button) => button.textContent?.includes('Retranscribe entire page'))?.disabled).toBe(false);
-    expect(buttons.find((button) => button.textContent?.includes('Retranscribe selected'))?.disabled).toBe(true);
+    await act(async () => root.render(<ScribeActionPanel {...props({ deleteTarget: null, selectedAnnotation: null })} />));
+    expect(document.querySelector('button[aria-label="scribeEditorDelete"]')?.disabled).toBe(true);
   });
 });

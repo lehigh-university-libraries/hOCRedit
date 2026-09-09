@@ -82,6 +82,7 @@ type BrowserHarness = {
     selectedAnnotationId: string;
     selectedDraftTarget: unknown;
     statusMessage: string;
+    reprocessRequests: Array<{ canvasId: string; itemImageId: string; windowId: string }>;
     transcriptionCalls: Array<{
       annotationId: string;
       contextId: string;
@@ -239,7 +240,7 @@ test("a production SSE completion rebases the mounted dirty editor through Conne
     sessionStatus: "ready",
   });
 
-  await page.getByRole("button", { name: "Overlay off" }).click();
+  await page.getByRole("button", { name: "Edit overlay", exact: true }).click();
   const inputs = page.getByRole("textbox", { name: /Edit line token/ });
   const inputValues = () => inputs.evaluateAll(
     (elements) => elements.map((element) => (element as HTMLInputElement).value),
@@ -455,7 +456,7 @@ test("production Scribe viewer options keep the full bottom pane usable at every
 
     const viewActions = panel.locator('[role="group"][aria-label="View and modes"] button[aria-label]');
     const textActions = panel.locator('[role="group"][aria-label="Text and page actions"] button[aria-label]');
-    await expect(viewActions).toHaveCount(5);
+    await expect(viewActions).toHaveCount(9);
     await expect(textActions).toHaveCount(9);
     const toolbarActions = await panel.locator(
       '[role="group"][aria-label="View and modes"] button[aria-label], [role="group"][aria-label="Text and page actions"] button[aria-label]',
@@ -474,7 +475,7 @@ test("production Scribe viewer options keep the full bottom pane usable at every
         };
       })
     ));
-    expect(toolbarActions).toHaveLength(14);
+    expect(toolbarActions).toHaveLength(18);
     for (const action of toolbarActions) {
       expect(action.left, action.label).toBeGreaterThanOrEqual(-1);
       expect(action.right, action.label).toBeLessThanOrEqual(viewport.width + 1);
@@ -484,7 +485,12 @@ test("production Scribe viewer options keep the full bottom pane usable at every
       );
     }
 
-    for (const name of ["Overlay off", "Retranscribe", "Save", "Publish edits"]) {
+    for (const name of [
+      "Edit overlay",
+      "Re-segment and retranscribe the whole page with the selected processing context",
+      "Save",
+      "Publish edits",
+    ]) {
       const action = page.getByRole("button", { name, exact: true });
       await expect(action).toBeVisible();
       if (await action.isEnabled()) {
@@ -555,8 +561,8 @@ test("a mounted editor reallocates the bottom pane after an in-place viewport re
         panelDoesNotOverflowHorizontally: element.scrollWidth <= element.clientWidth + 1,
         shortcutLegendMatches: expectedViewport.shortcutLegendVisible
           ? shortcutLegendIsVisible
-            && shortcutItems.length === 11
-            && shortcutLegend?.querySelectorAll('kbd').length === 11
+            && shortcutItems.length === 18
+            && shortcutLegend?.querySelectorAll('kbd').length === 18
             && shortcutItems.every((item) => {
               const rect = item.getBoundingClientRect();
               const label = item.querySelector<HTMLElement>('span');
@@ -584,7 +590,7 @@ test("a mounted editor reallocates the bottom pane after an in-place viewport re
       shortcutLegendMatches: metrics.shortcutLegendMatches,
     };
   }, { timeout: 10_000 }).toEqual({
-    actionCount: 14,
+    actionCount: 18,
     actionsStayInBounds: true,
     imageRetainsMinimumHeight: true,
     pageDoesNotOverflow: true,
@@ -623,7 +629,10 @@ test("mounted Mirador/Scribe keeps edits and events scoped across two real Canva
     '.scribe-text-overlay [data-scribe-granularity]',
   );
   await expect(actionPanel).toBeVisible();
-  await expect(granularityMarkers).toHaveCount(0);
+  // A page that already has text opens with the read overlay on, so its
+  // lines are visible without a further click.
+  await expect(granularityMarkers).not.toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Read overlay", exact: true })).toHaveAttribute("aria-pressed", "true");
   const canvasB = "http://127.0.0.1:4173/e2e/canvas/b";
   await page.evaluate((canvasId) => window.__scribeBrowserHarness.turnPluginCanvas(canvasId), canvasB);
   await expect.poll(async () => page.evaluate(() => {
@@ -668,32 +677,25 @@ test("mounted Mirador/Scribe keeps edits and events scoped across two real Canva
     window.__scribeBrowserHarness.pluginSnapshot().pageB.draftCount
   )), pluginPollOptions).toBe(1);
 
-  const retranscribe = page.getByRole("button", { name: "Retranscribe", exact: true });
-  await expect(retranscribe).toBeEnabled();
+  // Whole-page reprocessing is the only automatic transcription path. The
+  // plugin asks the shell for it with the exact window, Canvas, and image.
+  const reprocess = page.getByRole("button", { name: /^Re-segment and retranscribe/, exact: false });
+  await expect(reprocess).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Retranscribe", exact: true })).toHaveCount(0);
   await page.keyboard.press("Alt+r");
-  await expect(page.getByRole("dialog", { name: "Retranscribe Text" })).toBeVisible();
-  await page.getByRole("button", { name: "Retranscribe selected" }).click();
   await expect.poll(async () => page.evaluate(() => {
     const snapshot = window.__scribeBrowserHarness.pluginSnapshot();
     return {
       calls: snapshot.transcriptionCalls,
-      statusMessage: snapshot.statusMessage,
+      requests: snapshot.reprocessRequests,
       text: snapshot.structural.draft[0]?.text,
     };
   }), pluginPollOptions).toEqual({
-    calls: [{
-      annotationId: "https://scribe.test/presentation/v3/item-image-2002/canvas/page-1/annotations/items/00000000000000000000000000000002",
-      contextId: "1",
-      itemImageId: "2002",
-      scope: "line",
-    }],
-    statusMessage: "Selected text retranscribed. Save to persist this draft.",
-    text: "retranscribed page B original",
+    calls: [],
+    requests: [{ canvasId: canvasB, itemImageId: "2002", windowId: "plugin-window" }],
+    text: "page B original",
   });
-  await page.getByRole("button", { name: "Undo" }).click();
-  await expect.poll(async () => page.evaluate(() => (
-    window.__scribeBrowserHarness.pluginSnapshot().structural.draft[0]?.text
-  )), pluginPollOptions).toBe("page B original");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
 
   const addCenteredLine = page.getByRole("button", {
     name: "Add a line at the viewport center and focus its keyboard resize handle",
@@ -715,7 +717,7 @@ test("mounted Mirador/Scribe keeps edits and events scoped across two real Canva
   const creationStatus = page.getByRole("status").filter({ hasText: "Draft line created." });
   await expect(creationStatus).toHaveAttribute("aria-live", "polite");
   const southeastResize = page.getByRole("button", {
-    name: "Resize annotation from the se corner",
+    name: "Resize line from the se corner",
   });
   await expect(southeastResize).toBeFocused();
   await expect(southeastResize).toHaveAttribute(
@@ -763,7 +765,7 @@ test("mounted Mirador/Scribe keeps edits and events scoped across two real Canva
   )), pluginPollOptions).toBe(1);
   await page.keyboard.press("Escape");
 
-  await page.getByRole("button", { name: "Overlay off" }).click();
+  await page.getByRole("button", { name: "Edit overlay", exact: true }).click();
   const inputs = page.getByRole("textbox", { name: /Edit line token/ });
   await expect(inputs).toHaveCount(3);
   await expect(granularityMarkers).not.toHaveCount(0);
@@ -799,7 +801,10 @@ test("mounted Mirador/Scribe keeps edits and events scoped across two real Canva
   await expect.poll(async () => page.evaluate(() => window.__scribeBrowserHarness.pluginSnapshot()), pluginPollOptions)
     .toMatchObject({ isBusy: true, saveItemImageIds: [], splitPending: true, structural: { calls: { splitAtWord: 2 } } });
   await page.keyboard.press("Alt+r");
-  await expect(page.getByRole("dialog", { name: "Retranscribe Text" })).toBeHidden();
+  // A busy editor never forwards a reprocess request.
+  await expect.poll(async () => page.evaluate(() => (
+    window.__scribeBrowserHarness.pluginSnapshot().reprocessRequests.length
+  )), pluginPollOptions).toBe(1);
   await page.keyboard.press("Control+s");
   await expect.poll(async () => page.evaluate(() => window.__scribeBrowserHarness.pluginSnapshot()), pluginPollOptions)
     .toMatchObject({ isBusy: true, saveItemImageIds: [], splitPending: true });
@@ -815,7 +820,7 @@ test("mounted Mirador/Scribe keeps edits and events scoped across two real Canva
   await page.keyboard.press("Escape");
   await expect(inputs).toHaveCount(0);
   await expect(granularityMarkers).toHaveCount(0);
-  await page.getByRole("button", { name: "Overlay off" }).click();
+  await page.getByRole("button", { name: "Edit overlay", exact: true }).click();
   await expect(inputs).toHaveCount(3);
   await inputs.nth(1).focus();
   await page.keyboard.press("Control+Backspace");
@@ -906,15 +911,16 @@ test("structural edit pickers split, join lines, and retain words when forming a
     window.__scribeBrowserHarness.pluginSnapshot().activeCanvasId
   )), pluginPollOptions).toBe(canvasB);
 
-  await expect(page.locator("[data-scribe-granularity]")).toHaveCount(0);
-  await expect(page.locator('[data-scribe-granularity="line"]')).toHaveCount(0);
-  await expect(page.locator('[data-scribe-granularity="word"]')).toHaveCount(0);
-  await page.getByRole("button", { name: "Overlay off", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Edit overlay", exact: true })).toBeVisible();
+  // Text is present, so the read overlay is already on; every word and line
+  // stays a click target in every mode.
+  await expect(page.getByRole("button", { name: "Read overlay", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator('[data-scribe-granularity="line"]')).not.toHaveCount(0);
   await expect(page.locator('[data-scribe-granularity="word"]')).not.toHaveCount(0);
-  await page.getByRole("button", { name: /Edit overlay/i }).click();
-  await expect(page.getByRole("button", { name: /Read overlay/i })).toBeVisible();
+  await page.getByRole("button", { name: "Off overlay", exact: true }).click();
+  await expect(page.locator("[data-scribe-granularity]")).toHaveCount(0);
+  await expect(page.locator('[data-scribe-hit="word"]')).not.toHaveCount(0);
+  await page.getByRole("button", { name: "Edit overlay", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Edit overlay", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator('[data-scribe-granularity="line"]')).not.toHaveCount(0);
   await expect(page.locator('[data-scribe-granularity="word"]')).not.toHaveCount(0);
 
@@ -936,9 +942,7 @@ test("structural edit pickers split, join lines, and retain words when forming a
 
   await page.keyboard.press("Escape");
   await expect(page.locator("[data-scribe-granularity]")).toHaveCount(0);
-  await page.getByRole("button", { name: /Overlay off/i }).click();
-  await page.getByRole("button", { name: /Edit overlay/i }).click();
-  await expect(page.getByRole("button", { name: /Read overlay/i })).toBeVisible();
+  await page.getByRole("button", { name: "Read overlay", exact: true }).click();
   await page.getByRole("button", { name: "Edit line: second line" }).click();
   await page.getByRole("button", { name: /Join lines/i }).focus();
   await page.keyboard.press("Alt+l");
@@ -956,7 +960,7 @@ test("structural edit pickers split, join lines, and retain words when forming a
     texts: expect.arrayContaining(["second line fifth line", "fourth line"]),
   });
 
-  await page.getByRole("button", { name: /Edit overlay/i }).click();
+  await page.getByRole("button", { name: "Read overlay", exact: true }).click();
   await page.getByRole("button", { name: "Edit word: red" }).click();
   await page.getByRole("button", { name: /Join words/i }).focus();
   await page.keyboard.press("Alt+w");

@@ -1,6 +1,7 @@
 import { sessionIsDirty } from './session';
 import { dirtyEditorSessions, editorSessionForCanvas } from './sessionCache';
 import type {
+  AnnotationCorrectionMetric,
   AnnotationPageSnapshot,
   EditorSessionCache,
   IIIFAnnotationPage,
@@ -12,6 +13,7 @@ export interface SavedEditorSession extends Omit<AnnotationPageSnapshot, 'page'>
 }
 
 export interface AcceptedSave extends AnnotationPageSnapshot {
+  correction: AnnotationCorrectionMetric | null;
   submittedPage: IIIFAnnotationPage;
   submittedRevision: string;
   type: 'saved';
@@ -101,6 +103,7 @@ export async function saveCachedEditorSessions({
         && (!pageId(submittedPage) || pageId(snapshot.page) === pageId(submittedPage));
 
       await acceptSaved(canvasId, {
+        correction: snapshot.correction ?? null,
         page: snapshot.page,
         revision: snapshot.revision,
         submittedPage,

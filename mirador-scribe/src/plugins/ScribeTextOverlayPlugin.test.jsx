@@ -305,3 +305,221 @@ describe('ScribeTextOverlayPlugin', () => {
     document.removeEventListener('scribe:focus-annotation', handleFocus);
   });
 });
+
+function word(id = 'word-1', bbox = '230,32,28,20', text = 'alpha') {
+  return {
+    body: [{ purpose: 'supplementing', type: 'TextualBody', value: text }],
+    id,
+    target: `${canvasId}#xywh=pixel:${bbox}`,
+    textGranularity: 'word',
+    type: 'Annotation',
+  };
+}
+
+function textLine(id, bbox, text) {
+  return { ...line(id, bbox), body: [{ purpose: 'supplementing', type: 'TextualBody', value: text }] };
+}
+
+function pointer(type, init) {
+  return new PointerEvent(type, { bubbles: true, isPrimary: true, pointerId: 1, ...init });
+}
+
+async function renderOverlay(items, mountedViewer) {
+  container = document.createElement('div');
+  document.body.appendChild(container);
+  root = createRoot(container);
+  await act(async () => root.render(<ScribeTextOverlayPlugin
+    annotationPage={{ id: 'page-1', items, type: 'AnnotationPage' }}
+    canvasId={canvasId}
+    selectedAnnotationId=""
+    viewer={mountedViewer}
+    windowId={windowId}
+  />));
+}
+
+describe('ScribeTextOverlayPlugin interaction', () => {
+  it('selects a word from a click while the overlay is off and ignores a drag', async () => {
+    const selections = [];
+    const handleSelect = (event) => selections.push(event.detail);
+    document.addEventListener('scribe:select-annotation', handleSelect);
+    await renderOverlay([textLine('line-1', '20,30,240,24', 'alpha beta'), word()], viewer());
+
+    const hit = viewerCanvas.querySelector('[data-scribe-hit="word"]');
+    expect(hit).not.toBeNull();
+    expect(hit?.getAttribute('aria-hidden')).toBe('true');
+    expect(viewerCanvas.querySelector('[data-scribe-hit="line"]')).not.toBeNull();
+
+    await act(async () => hit?.dispatchEvent(pointer('pointerdown', { clientX: 240, clientY: 40 })));
+    await act(async () => window.dispatchEvent(pointer('pointerup', { clientX: 300, clientY: 40 })));
+    expect(selections).toHaveLength(0);
+
+    await act(async () => hit?.dispatchEvent(pointer('pointerdown', { clientX: 240, clientY: 40 })));
+    await act(async () => window.dispatchEvent(pointer('pointerup', { clientX: 242, clientY: 41 })));
+    expect(selections).toEqual([{
+      annotationId: 'word-1',
+      canvasId,
+      focusAnnotationId: 'word-1',
+      overlayMode: 'edit',
+      windowId,
+    }]);
+    document.removeEventListener('scribe:select-annotation', handleSelect);
+  });
+
+  it('moves the focused word with the keyboard while keeping it inside its line', async () => {
+    const geometry = [];
+    const handleGeometry = (event) => geometry.push(event.detail);
+    document.addEventListener('scribe:resize-annotation', handleGeometry);
+    const items = [textLine('line-1', '20,30,240,24', 'alpha'), word()];
+    await renderOverlay(items, viewer());
+    await act(async () => {
+      document.dispatchEvent(new CustomEvent('scribe:editor-state', {
+        detail: {
+          annotationPage: { id: 'page-1', items, type: 'AnnotationPage' },
+          canvasId,
+          focusedWordAnnotationId: 'word-1',
+          overlayMode: 'edit',
+          selectedAnnotationId: 'line-1',
+          windowId,
+        },
+      }));
+    });
+
+    const moveHandle = viewerCanvas.querySelector('[data-scribe-move-handle="word"]');
+    expect(moveHandle?.getAttribute('aria-label')).toBe('Move word: alpha');
+    expect(viewerCanvas.querySelector('[data-scribe-geometry-target="word"]')).not.toBeNull();
+    await act(async () => moveHandle?.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'ArrowRight', shiftKey: true })));
+    expect(geometry).toEqual([{
+      annotationId: 'word-1',
+      bbox: { h: 20, w: 28, x: 232, y: 32 },
+      canvasId,
+      operation: 'move',
+      windowId,
+    }]);
+
+    const corner = viewerCanvas.querySelector('[data-scribe-resize-handle="se"]');
+    await act(async () => corner?.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'ArrowDown' })));
+    expect(geometry.at(-1)).toEqual(expect.objectContaining({
+      bbox: { h: 21, w: 28, x: 230, y: 32 },
+      operation: 'resize',
+    }));
+    document.removeEventListener('scribe:resize-annotation', handleGeometry);
+  });
+
+  it('keeps mouse navigation enabled while editing', async () => {
+    const mountedViewer = viewer();
+    const items = [textLine('line-1', '20,30,240,24', 'alpha')];
+    await renderOverlay(items, mountedViewer);
+    await act(async () => {
+      document.dispatchEvent(new CustomEvent('scribe:editor-state', {
+        detail: {
+          annotationPage: { id: 'page-1', items, type: 'AnnotationPage' },
+          canvasId,
+          overlayMode: 'edit',
+          selectedAnnotationId: 'line-1',
+          windowId,
+        },
+      }));
+    });
+    expect(viewerCanvas.querySelector('[data-scribe-inline-editor]')?.getAttribute('data-scribe-interactive')).toBe('true');
+    expect(mountedViewer.setMouseNavEnabled).not.toHaveBeenCalledWith(false);
+    expect(document.activeElement).toBe(viewerCanvas.querySelector('input'));
+    const shellSelect = document.createElement('select');
+    container.appendChild(shellSelect);
+    shellSelect.focus();
+    const animate = mountedViewer.addHandler.mock.calls.find(([name]) => name === 'animation')?.[1];
+    await act(async () => animate?.());
+    expect(document.activeElement).toBe(shellSelect);
+    for (const isBusy of [true, false]) {
+      await act(async () => document.dispatchEvent(new CustomEvent('scribe:editor-state', {
+        detail: { canvasId, isBusy, overlayMode: 'edit', selectedAnnotationId: 'line-1', windowId },
+      })));
+    }
+    expect(document.activeElement).toBe(viewerCanvas.querySelector('input'));
+  });
+
+  it('aligns transcript rows with their image lines and reserves a viewer margin', async () => {
+    const mountedViewer = viewer();
+    mountedViewer.viewport.setMargins = vi.fn();
+    const items = [
+      textLine('line-1', '20,30,240,24', 'first line'),
+      textLine('line-2', '20,90,240,30', 'second line'),
+    ];
+    const selections = [];
+    const handleSelect = (event) => selections.push(event.detail);
+    document.addEventListener('scribe:select-annotation', handleSelect);
+    const edits = [];
+    const handleEdit = (event) => edits.push(event.detail);
+    document.addEventListener('scribe:inline-change-text', handleEdit);
+    await renderOverlay(items, mountedViewer);
+    await act(async () => {
+      document.dispatchEvent(new CustomEvent('scribe:editor-state', {
+        detail: {
+          annotationPage: { id: 'page-1', items, type: 'AnnotationPage' },
+          canvasId,
+          overlayMode: 'transcript',
+          selectedAnnotationId: 'line-1',
+          windowId,
+        },
+      }));
+    });
+
+    expect(mountedViewer.setMouseNavEnabled).not.toHaveBeenCalledWith(false);
+    expect(mountedViewer.viewport.setMargins).toHaveBeenLastCalledWith({ right: 304 });
+    const pane = viewerCanvas.querySelector('[data-scribe-transcript-pane]');
+    expect(pane?.getAttribute('aria-label')).toBe('Transcript');
+    const rows = [...viewerCanvas.querySelectorAll('input[data-scribe-transcript-row]')];
+    expect(rows.map((row) => row.value)).toEqual(['first line', 'second line']);
+    expect(rows.map((row) => row.style.top)).toEqual(['30px', '90px']);
+    expect(rows.map((row) => row.style.height)).toEqual(['24px', '30px']);
+    expect(rows[0].getAttribute('aria-label')).toBe('Transcript line 1: first line');
+
+    const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+    await act(async () => {
+      valueSetter?.call(rows[1], 'second line fixed');
+      rows[1].dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(edits).toEqual([expect.objectContaining({
+      annotationId: 'line-2',
+      canvasId,
+      text: 'second line fixed',
+      windowId,
+    })]);
+
+    await act(async () => rows[0].dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter' })));
+    expect(selections.at(-1)).toEqual({
+      annotationId: 'line-2',
+      canvasId,
+      focusAnnotationId: '',
+      overlayMode: 'transcript',
+      windowId,
+    });
+
+    await act(async () => {
+      document.dispatchEvent(new CustomEvent('scribe:editor-state', {
+        detail: { annotationPage: { id: 'page-1', items, type: 'AnnotationPage' }, canvasId, overlayMode: 'none', windowId },
+      }));
+    });
+    expect(mountedViewer.viewport.setMargins).toHaveBeenLastCalledWith({});
+    document.removeEventListener('scribe:select-annotation', handleSelect);
+    document.removeEventListener('scribe:inline-change-text', handleEdit);
+  });
+
+  it('keeps off-screen words in a visible transcript line', async () => {
+    const mountedViewer = viewer();
+    mountedViewer.world.getItemAt(0).viewportToImageRectangle = () => ({
+      height: 600, width: 100, x: 0, y: 0,
+    });
+    const items = [
+      textLine('line-1', '20,30,600,24', 'first last'),
+      word('word-1', '20,30,50,24', 'first'),
+      word('word-2', '500,30,50,24', 'last'),
+      textLine('line-2', '500,90,100,24', 'hidden'),
+    ];
+    await renderOverlay(items, mountedViewer);
+    await act(async () => document.dispatchEvent(new CustomEvent('scribe:editor-state', {
+      detail: { canvasId, overlayMode: 'transcript', windowId },
+    })));
+    const rows = [...viewerCanvas.querySelectorAll('input[data-scribe-transcript-row]')];
+    expect(rows.map((row) => row.value)).toEqual(['first last']);
+  });
+});

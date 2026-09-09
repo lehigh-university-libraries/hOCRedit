@@ -34,6 +34,7 @@ const pluginLoadItemImageIds = [];
 const pluginSaveItemImageIds = [];
 const pluginActiveCanvasEvents = [];
 const pluginTranscriptionCalls = [];
+const pluginReprocessRequests = [];
 let pluginLastEditorState = null;
 let pluginPendingSplit = null;
 let pluginStructuralCalls = {
@@ -147,6 +148,7 @@ async function initializePlugin(structural = false) {
   ]);
   pluginStructuralCalls = { joinLineIds: [], joinWordIds: [], splitAtWord: 0 };
   pluginTranscriptionCalls.length = 0;
+  pluginReprocessRequests.length = 0;
   pluginState = new Map([
     ["1001", {
       page: page([{
@@ -283,6 +285,11 @@ async function initializePlugin(structural = false) {
   );
   document.addEventListener("scribe:active-canvas", (event) => {
     pluginActiveCanvasEvents.push(structuredClone(event.detail));
+  });
+  document.addEventListener("scribe:request-reprocess", (event) => {
+    if (event.detail?.windowId === "plugin-window") {
+      pluginReprocessRequests.push(structuredClone(event.detail));
+    }
   });
   document.addEventListener("scribe:editor-state", (event) => {
     if (event.detail?.windowId === "plugin-window") {
@@ -897,6 +904,7 @@ function pluginSnapshot() {
     selectedAnnotationId: pluginLastEditorState?.selectedAnnotationId || "",
     selectedDraftTarget: structuredClone(selectedDraft?.target || null),
     statusMessage: pluginLastEditorState?.statusMessage || "",
+    reprocessRequests: structuredClone(pluginReprocessRequests),
     transcriptionCalls: structuredClone(pluginTranscriptionCalls),
     splitPending: Boolean(pluginPendingSplit),
     structural: {

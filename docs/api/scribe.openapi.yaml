@@ -2392,6 +2392,35 @@ components:
           $ref: '#/components/schemas/scribe.v1.WorkspaceMember'
       title: AddWorkspaceMemberResponse
       additionalProperties: false
+    scribe.v1.AnnotationCorrectionMetric:
+      type: object
+      properties:
+        levenshteinDistance:
+          type: integer
+          title: levenshtein_distance
+          format: int32
+          description: |-
+            Character-level Levenshtein distance between the normalized baseline
+             text and the normalized saved page text.
+        baselineCharacters:
+          type: integer
+          title: baseline_characters
+          format: int32
+          description: |-
+            Unicode code points in the normalized baseline text, so a client can
+             present the distance as a ratio.
+        correctedCharacters:
+          type: integer
+          title: corrected_characters
+          format: int32
+          description: Unicode code points in the normalized saved page text.
+      title: AnnotationCorrectionMetric
+      additionalProperties: false
+      description: |-
+        AnnotationCorrectionMetric summarizes how far a committed page has moved from
+         the model baseline recorded by its OCR run. It is derived on the server in
+         the same transaction as the saved revision; clients display it and never
+         compute it locally.
     scribe.v1.AnnotationExportFormat:
       type: string
       title: AnnotationExportFormat
@@ -4651,6 +4680,10 @@ components:
         updatedAt:
           type: string
           title: updated_at
+        correction:
+          title: correction
+          description: Present only when the image has an OCR run baseline to score against.
+          $ref: '#/components/schemas/scribe.v1.AnnotationCorrectionMetric'
       title: SaveAnnotationPageResponse
       additionalProperties: false
     scribe.v1.SearchAnnotationsRequest:

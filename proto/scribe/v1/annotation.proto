@@ -75,12 +75,29 @@ message SaveAnnotationPageRequest {
   uint64 expected_revision = 3;
 }
 
+// AnnotationCorrectionMetric summarizes how far a committed page has moved from
+// the model baseline recorded by its OCR run. It is derived on the server in
+// the same transaction as the saved revision; clients display it and never
+// compute it locally.
+message AnnotationCorrectionMetric {
+  // Character-level Levenshtein distance between the normalized baseline
+  // text and the normalized saved page text.
+  int32 levenshtein_distance = 1;
+  // Unicode code points in the normalized baseline text, so a client can
+  // present the distance as a ratio.
+  int32 baseline_characters = 2;
+  // Unicode code points in the normalized saved page text.
+  int32 corrected_characters = 3;
+}
+
 message SaveAnnotationPageResponse {
   uint64 item_image_id = 1;
   string canvas_uri = 2;
   string annotation_page_json = 3;
   uint64 revision = 4;
   string updated_at = 5;
+  // Present only when the image has an OCR run baseline to score against.
+  AnnotationCorrectionMetric correction = 6;
 }
 
 message GetAnnotationRequest {

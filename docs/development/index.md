@@ -11,6 +11,7 @@ mutations in the browser, or adding REST-only business routes.
 - [Add a system context](adding-system-context.md)
 - [Add a Connect RPC](adding-rpc.md)
 - [Change the Mirador plugin](mirador-plugin.md)
+- [Transcription editor UX review](editor-ux-review.md)
 - [Change the web application](web-frontend.md)
 - [Run and write tests](testing.md)
 - [Regenerate contracts](code-generation.md)

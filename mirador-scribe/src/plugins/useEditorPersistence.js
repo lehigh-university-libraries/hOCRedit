@@ -6,6 +6,7 @@ import {
 import { saveCachedEditorSessions } from '../editor/sessionPersistence';
 import { annotationCanvasId } from '../utils/iiif';
 
+/** @typedef {import('../types/scribe').AnnotationCorrectionMetric} AnnotationCorrectionMetric */
 /** @typedef {import('../types/scribe').EditorSessionAction} EditorSessionAction */
 /** @typedef {import('../types/scribe').EditorSessionCache} EditorSessionCache */
 /** @typedef {import('../types/scribe').IIIFAnnotation} IIIFAnnotation */
@@ -23,6 +24,7 @@ import { annotationCanvasId } from '../utils/iiif';
  * @param {string} options.canvasId
  * @param {(canvasId: string, action: EditorSessionAction) => EditorSessionCache} options.dispatchSessionForCanvas
  * @param {(canvasId?: string) => boolean} options.editingIsBlocked
+ * @param {(canvasId: string, saved: { basePage: IIIFAnnotationPage | null, correction: AnnotationCorrectionMetric | null, revision: string, savedPage: IIIFAnnotationPage | null }) => string} [options.onSaved] Returns a summary appended to the success message.
  * @param {{ current: boolean }} options.saveInFlightRef
  * @param {IIIFAnnotation | null} options.selectedAnnotation
  * @param {{ current: EditorSessionCache }} options.sessionCacheRef
@@ -35,6 +37,7 @@ export function useEditorPersistence({
   canvasId,
   dispatchSessionForCanvas,
   editingIsBlocked,
+  onSaved,
   saveInFlightRef,
   selectedAnnotation,
   sessionCacheRef,
@@ -76,6 +79,8 @@ export function useEditorPersistence({
     const savingCanvasIds = requestedCanvasIds.filter((targetCanvasId) => (
       sessionIsDirty(editorSessionForCanvas(sessionCacheRef.current, targetCanvasId))
     ));
+    /** @type {string[]} */
+    const savedSummaries = [];
     if (savingCanvasIds.length > 0) setOperationBusy(true);
     setStatusMessage(savingCanvasIds.length > 0
       ? (requireAllClean ? 'Saving all page changes...' : 'Saving page changes...')
@@ -83,7 +88,18 @@ export function useEditorPersistence({
     try {
       const result = await saveCachedEditorSessions({
         acceptSaved: (targetCanvasId, action) => {
+          // The base page must be read before the reducer adopts the saved
+          // page as the new base, otherwise the diff is always empty.
+          const basePage = editorSessionForCanvas(sessionCacheRef.current, targetCanvasId).basePage;
           dispatchSessionForCanvas(targetCanvasId, action);
+          if (!onSaved) return;
+          const summary = onSaved(targetCanvasId, {
+            basePage,
+            correction: action.correction ?? null,
+            revision: String(action.revision || ''),
+            savedPage: action.page,
+          });
+          if (summary) savedSummaries.push(summary);
         },
         adapterFactory: factory,
         beginSave: (targetCanvasId) => {
@@ -99,7 +115,9 @@ export function useEditorPersistence({
       const code = String(resultError?.code || resultError?.cause?.code || '').toLowerCase();
       const conflict = resultError?.name === 'RevisionConflict' || code === 'aborted' || code === '10';
       if (result.ok) {
-        setStatusMessage(successMessage);
+        setStatusMessage(savedSummaries.length > 0
+          ? `${successMessage.replace(/\.$/, '')}: ${savedSummaries.join('; ')}.`
+          : successMessage);
       } else if (conflict) {
         const message = 'This page changed on the server. Reload to rebase your draft, then save again.';
         if (result.failedCanvasId) {

@@ -714,3 +714,114 @@ describe('document event bridges', () => {
     expect(setViewportBounds).toHaveBeenCalledWith({ h: 40, w: 30, x: 10, y: 20 });
   });
 });
+
+describe('inline editor bridge additions', () => {
+  it('edits the row named by the payload and records the operation', () => {
+    const lineOne = annotation('line-1', 'one', 'line', 10, 10);
+    const lineTwo = annotation('line-2', 'two', 'line', 10, 50);
+    const pushHistory = vi.fn();
+    const recordOperation = vi.fn();
+    const selectAnnotation = vi.fn();
+    const options = {
+      canvasId,
+      effectiveSelectedAnnotationId: lineOne.id,
+      editingIsBlocked: () => false,
+      handleSave: vi.fn(),
+      localPage: page([lineOne, lineTwo]),
+      pushHistory,
+      recordOperation,
+      selectedAnnotation: lineOne,
+      selectAnnotation,
+      serverPage: null,
+      setDrawMode: vi.fn(),
+      setFocusedWordAnnotationId: vi.fn(),
+      setOverlayMode: vi.fn(),
+      setStatusMessage: vi.fn(),
+      visibleRows: [
+        { fields: [lineOne], granularity: 'line', id: lineOne.id, lead: lineOne },
+        { fields: [lineTwo], granularity: 'line', id: lineTwo.id, lead: lineTwo },
+      ],
+      windowId,
+    };
+    mount(<InlineBridgeHarness options={options} />);
+
+    dispatch('scribe:inline-change-text', {
+      annotationId: lineTwo.id, canvasId, text: 'two edited', windowId,
+    });
+    expect(pushHistory).toHaveBeenCalledOnce();
+    const nextPage = pushHistory.mock.calls[0][0];
+    expect(nextPage.items.find(({ id }) => id === lineTwo.id).body[0].value).toBe('two edited');
+    expect(nextPage.items.find(({ id }) => id === lineOne.id).body[0].value).toBe('one');
+    expect(selectAnnotation).toHaveBeenCalledWith(windowId, lineTwo.id);
+    expect(recordOperation).toHaveBeenCalledWith('text-edit');
+
+    dispatch('scribe:inline-change-text', {
+      annotationId: 'missing', canvasId, text: 'stale row edit', windowId,
+    });
+    expect(pushHistory).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the transcript mode for selections that come from the transcript pane', () => {
+    const lineOne = annotation('line-1', 'one', 'line', 10, 10);
+    const setOverlayMode = vi.fn();
+    const options = {
+      canvasId,
+      effectiveSelectedAnnotationId: '',
+      editingIsBlocked: () => false,
+      handleSave: vi.fn(),
+      localPage: page([lineOne]),
+      pushHistory: vi.fn(),
+      selectedAnnotation: null,
+      selectAnnotation: vi.fn(),
+      serverPage: null,
+      setDrawMode: vi.fn(),
+      setFocusedWordAnnotationId: vi.fn(),
+      setOverlayMode,
+      setStatusMessage: vi.fn(),
+      visibleRows: [],
+      windowId,
+    };
+    mount(<InlineBridgeHarness options={options} />);
+
+    dispatch('scribe:select-annotation', { annotationId: lineOne.id, canvasId, overlayMode: 'transcript', windowId });
+    expect(setOverlayMode).toHaveBeenLastCalledWith('transcript');
+    dispatch('scribe:select-annotation', { annotationId: lineOne.id, canvasId, overlayMode: 'outline', windowId });
+    expect(setOverlayMode).toHaveBeenLastCalledWith('edit');
+    dispatch('scribe:select-annotation', { annotationId: lineOne.id, canvasId, windowId });
+    expect(setOverlayMode).toHaveBeenLastCalledWith('edit');
+  });
+
+  it('records a box move separately from a box resize', () => {
+    const lineOne = annotation('line-1', 'one', 'line', 10, 10);
+    const pushHistory = vi.fn();
+    const recordOperation = vi.fn();
+    const options = {
+      canvasId,
+      effectiveSelectedAnnotationId: lineOne.id,
+      editingIsBlocked: () => false,
+      handleSave: vi.fn(),
+      localPage: page([lineOne]),
+      pushHistory,
+      recordOperation,
+      selectedAnnotation: lineOne,
+      selectAnnotation: vi.fn(),
+      serverPage: null,
+      setDrawMode: vi.fn(),
+      setFocusedWordAnnotationId: vi.fn(),
+      setOverlayMode: vi.fn(),
+      setStatusMessage: vi.fn(),
+      visibleRows: [],
+      windowId,
+    };
+    mount(<InlineBridgeHarness options={options} />);
+
+    dispatch('scribe:resize-annotation', {
+      annotationId: lineOne.id, bbox: { h: 20, w: 80, x: 14, y: 10 }, canvasId, operation: 'move', windowId,
+    });
+    dispatch('scribe:resize-annotation', {
+      annotationId: lineOne.id, bbox: { h: 20, w: 90, x: 10, y: 10 }, canvasId, windowId,
+    });
+    expect(recordOperation.mock.calls.map(([kind]) => kind)).toEqual(['box-move', 'box-resize']);
+    expect(pushHistory).toHaveBeenCalledTimes(2);
+  });
+});

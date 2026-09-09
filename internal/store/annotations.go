@@ -101,6 +101,11 @@ type AnnotationIndexEntry struct {
 // prevents a revision and its correction score from drifting apart.
 type AnnotationCorrectionMetric struct {
 	LevenshteinDistance int
+	// BaselineCharacters and CorrectedCharacters are code-point counts of the
+	// normalized texts that produced the distance. They are returned to the
+	// editor for display and are not persisted.
+	BaselineCharacters  int
+	CorrectedCharacters int
 }
 
 // AnnotationJobCompletion is committed with the canonical page so a crash

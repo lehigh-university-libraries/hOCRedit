@@ -71,6 +71,7 @@ const productionReadinessManifestURLs = new Set([manifestURL, legacyManifestURL]
 const readinessManifestImageSHA256 = "0443cf4f28c60debf3237300d3357539b3b309f8c950af489491c686a13e0e16";
 const productionStorageStatePath = "/tmp/scribe-browser-session-state.json";
 const centeredLineAccessibleName = "Add a line at the viewport center and focus its keyboard resize handle";
+const reprocessAccessibleName = "Re-segment and retranscribe the whole page with the selected processing context";
 const deterministicLineText = "browser readiness alpha beta gamma";
 const deterministicWordTexts = Object.freeze([...deterministicLineText.split(" "), "epsilon"]);
 const deterministicJoinedLineText = deterministicWordTexts.join(" ");
@@ -1995,6 +1996,31 @@ async function waitForOverlayMarkersDisabled() {
   await page.waitForFunction(() => document.querySelector("[data-scribe-granularity]") === null);
 }
 
+async function selectOverlayMode(label) {
+  const toggle = page.getByRole("button", { name: `${label} overlay`, exact: true });
+  await toggle.click();
+  await page.waitForFunction((name) => (
+    document.querySelector(`[aria-label="Overlay mode"] button[aria-label="${name} overlay"]`)?.getAttribute("aria-pressed") === "true"
+  ), label);
+}
+
+// Every overlay mode is one exclusive choice in the mode switch. Walk through
+// all of them and finish with the overlay off so later stages start from the
+// image alone.
+async function cycleOverlayModes() {
+  await selectOverlayMode("Edit");
+  await page.locator(".scribe-text-overlay").waitFor({ state: "visible" });
+  await waitForOverlayLineMarkers();
+  await selectOverlayMode("Read");
+  await waitForOverlayLineMarkers();
+  await selectOverlayMode("Outline");
+  await waitForOverlayLineMarkers();
+  await selectOverlayMode("Transcript");
+  await page.locator('[data-scribe-transcript-pane="true"]').waitFor({ state: "visible" });
+  await selectOverlayMode("Off");
+  await waitForOverlayMarkersDisabled();
+}
+
 async function selectAllAdditionalCandidates(dialog, candidatePattern) {
   const candidates = dialog.getByRole("button", { name: candidatePattern });
   const count = await candidates.count();
@@ -3107,19 +3133,26 @@ try {
   category = "editor";
   await page.locator("#mirador-viewer").waitFor({ state: "visible" });
   await page.getByRole("heading", { name: "Editor", exact: true }).waitFor({ state: "visible" });
-  for (const name of ["Overlay off", "Retranscribe", "Save", "Publish edits"]) {
+  for (const name of [
+    "Edit overlay",
+    "Read overlay",
+    "Transcript overlay",
+    reprocessAccessibleName,
+    "Save",
+    "Publish edits",
+  ]) {
     await page.getByRole("button", { name, exact: true }).waitFor({ state: "visible" });
   }
   const textActions = page.getByRole("group", { name: "Text and page actions", exact: true });
   const editorActionButtons = textActions.locator("button");
-  const editorDelete = page.getByRole("button", { name: "Delete", exact: true });
+  const editorDelete = page.getByRole("button", { name: /^Delete the (line|word)/ });
   const editorDeleteState = {
     className: await editorDelete.getAttribute("class") ?? "",
     iconCount: await editorDelete.locator("svg").count(),
     lastLabel: await editorActionButtons.last().getAttribute("aria-label") ?? "",
   };
   if (
-    editorDeleteState.lastLabel !== "Delete"
+    !editorDeleteState.lastLabel.startsWith("Delete the ")
     || !editorDeleteState.className.includes("MuiButton-containedError")
     || editorDeleteState.iconCount !== 1
   ) {
@@ -3127,27 +3160,31 @@ try {
   }
 
   category = "overlay";
-  await page.getByRole("button", { name: "Overlay off", exact: true }).click();
-  await page.getByRole("button", { name: "Edit overlay", exact: true }).waitFor({ state: "visible" });
-  await page.locator(".scribe-text-overlay").waitFor({ state: "visible" });
-  await waitForOverlayLineMarkers();
-  await page.getByRole("button", { name: "Edit overlay", exact: true }).click();
-  await page.getByRole("button", { name: "Read overlay", exact: true }).click();
-  await page.getByRole("button", { name: "Outline overlay", exact: true }).click();
-  await page.getByRole("button", { name: "Overlay off", exact: true }).waitFor({ state: "visible" });
-  await waitForOverlayMarkersDisabled();
+  await cycleOverlayModes();
   assertBrowserHealthy();
 
   category = "retranscribe";
+  // Line-level foreground retranscription no longer exists. The only repeat
+  // transcription path is a whole-page reprocess with a chosen context, which
+  // is exercised end to end by the manifest stage. Here the editor must offer
+  // it without ever touching the foreground enrichment RPC.
   if (enrichAnnotationRequestCount !== 0) {
     throw new Error("automatic transcription used the foreground enrichment path");
   }
-  await page.getByRole("button", { name: "Retranscribe", exact: true }).click();
-  const transcribeDialog = page.getByRole("dialog").filter({ hasText: "entire page" });
-  await transcribeDialog.waitFor({ state: "visible" });
-  await transcribeDialog.getByRole("button", { name: /entire page/i }).click();
-  await page.getByText("Document retranscribed. Save to persist this draft.", { exact: true }).waitFor({ state: "visible" });
-  if (enrichAnnotationRequestCount < 1) throw new Error("manual retranscription omitted foreground enrichment");
+  await page.getByRole("button", { name: reprocessAccessibleName, exact: true }).waitFor({ state: "visible" });
+  await page.waitForFunction(() => {
+    const select = document.getElementById("reprocess-context");
+    return select instanceof HTMLSelectElement
+      && !select.disabled
+      && select.value === "0"
+      && (select.options[0]?.textContent || "").startsWith("Current: ");
+  });
+  if (await page.getByRole("dialog").count() !== 0) {
+    throw new Error("reprocess control opened an unexpected dialog");
+  }
+  if (enrichAnnotationRequestCount !== 0) {
+    throw new Error("reprocess control used the foreground enrichment path");
+  }
   assertBrowserHealthy();
 
   category = "structure";
@@ -3613,21 +3650,13 @@ try {
   }
 
   manifestFailureSubstage = "second-overlay";
-  const manifestRetranscribe = page.getByRole("button", { name: "Retranscribe", exact: true });
+  const manifestRetranscribe = page.getByRole("button", { name: reprocessAccessibleName, exact: true });
   await manifestRetranscribe.waitFor({ state: "visible" });
-  await page.waitForFunction(() => {
-    const retranscribe = document.querySelector('button[aria-label="Retranscribe"]');
+  await page.waitForFunction((name) => {
+    const retranscribe = document.querySelector(`button[aria-label="${name}"]`);
     return retranscribe instanceof HTMLButtonElement && !retranscribe.disabled;
-  });
-  await page.getByRole("button", { name: "Overlay off", exact: true }).click();
-  await page.getByRole("button", { name: "Edit overlay", exact: true }).waitFor({ state: "visible" });
-  await page.locator(".scribe-text-overlay").waitFor({ state: "visible" });
-  await waitForOverlayLineMarkers();
-  await page.getByRole("button", { name: "Edit overlay", exact: true }).click();
-  await page.getByRole("button", { name: "Read overlay", exact: true }).click();
-  await page.getByRole("button", { name: "Outline overlay", exact: true }).click();
-  await page.getByRole("button", { name: "Overlay off", exact: true }).waitFor({ state: "visible" });
-  await waitForOverlayMarkersDisabled();
+  }, reprocessAccessibleName);
+  await cycleOverlayModes();
   if (!await manifestRetranscribe.isEnabled()) {
     throw new Error("manifest editor action was unusable after overlay cycling");
   }

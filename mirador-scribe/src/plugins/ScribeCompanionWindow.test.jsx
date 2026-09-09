@@ -17,9 +17,7 @@ vi.mock('mirador', () => ({
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key) => ({
-      scribeEditorTranscribe: 'Retranscribe',
-      scribeEditorTranscribeDialogTitle: 'Retranscribe text',
-      scribeEditorTranscribeSelected: 'Retranscribe selected',
+      scribeEditorReprocess: 'Reprocess Page',
     })[key] || key,
   }),
 }));
@@ -260,12 +258,11 @@ describe('ScribeCompanionWindow', () => {
     expect(annotationBBox(addedWord)).toEqual({ x: 639, y: 10, w: 1, h: 20 });
   });
 
-  it('blocks Alt+R during the replayed durable batch and releases it after completion', async () => {
+  it('routes Alt+R to a scoped reprocess request only after the durable batch completes', async () => {
     const canonicalPage = page();
     const adapter = {
       itemImageId: '41',
       loadSnapshot: vi.fn(async () => ({ page: canonicalPage, revision: '1' })),
-      transcribeAnnotation: vi.fn(),
     };
     let replayActive = true;
     remoteRebaseListener = (event) => {
@@ -280,6 +277,9 @@ describe('ScribeCompanionWindow', () => {
       }));
     };
     document.addEventListener('scribe:remote-rebase-ready', remoteRebaseListener);
+    const reprocessRequests = [];
+    const handleReprocess = (event) => reprocessRequests.push(event.detail);
+    document.addEventListener('scribe:request-reprocess', handleReprocess);
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -297,7 +297,7 @@ describe('ScribeCompanionWindow', () => {
     />));
 
     await act(async () => pressRetranscribeShortcut());
-    expect(document.body.textContent).not.toContain('Retranscribe entire page');
+    expect(reprocessRequests).toHaveLength(0);
 
     replayActive = false;
     await act(async () => document.dispatchEvent(new CustomEvent('scribe:transcription-job-state', {
@@ -311,7 +311,226 @@ describe('ScribeCompanionWindow', () => {
     })));
     await act(async () => pressRetranscribeShortcut());
 
-    expect(document.body.textContent).toContain('Retranscribe entire page');
+    expect(reprocessRequests).toEqual([{ canvasId, itemImageId: '41', windowId }]);
+    expect(document.body.textContent).not.toContain('Retranscribe');
+    document.removeEventListener('scribe:request-reprocess', handleReprocess);
+  });
+
+  it.each([false, true])('respects an explicit overlay choice before transcription: %s', async (chooseOff) => {
+    const emptyLine = { ...line(), body: [{ purpose: 'supplementing', type: 'TextualBody', value: '' }] };
+    const untranscribedPage = { ...page(), items: [emptyLine] };
+    const transcribedPage = page();
+    let snapshot = { page: untranscribedPage, revision: '1' };
+    const adapter = {
+      itemImageId: '41',
+      loadSnapshot: vi.fn(async () => snapshot),
+    };
+    let latestState;
+    editorStateListener = (event) => {
+      latestState = event.detail;
+    };
+    document.addEventListener('scribe:editor-state', editorStateListener);
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    await act(async () => root.render(<ScribeCompanionWindow
+      adapterFactory={() => adapter}
+      canvasId={canvasId}
+      id="companion-1"
+      isFocusedWindow
+      receiveAnnotation={vi.fn()}
+      selectAnnotation={vi.fn()}
+      selectedAnnotationId="line-1"
+      serverPage={untranscribedPage}
+      windowId={windowId}
+    />));
+    await vi.waitFor(() => expect(latestState?.sessionStatus).toBe('ready'));
+    expect(latestState?.overlayMode).toBe('none');
+
+    if (chooseOff) {
+      await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Escape' })));
+    }
+
+    snapshot = { page: transcribedPage, revision: '2' };
+    await act(async () => document.dispatchEvent(new CustomEvent('scribe:reload-annotations', {
+      detail: { canvasId, itemImageId: '41', windowId },
+    })));
+    await vi.waitFor(() => expect(latestState?.overlayMode).toBe(chooseOff ? 'none' : 'read'));
+
+    // An explicit choice afterwards is never overridden by later reloads.
+    await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Escape' })));
+    await vi.waitFor(() => expect(latestState?.overlayMode).toBe('none'));
+    await act(async () => document.dispatchEvent(new CustomEvent('scribe:reload-annotations', {
+      detail: { canvasId, itemImageId: '41', windowId },
+    })));
+    await act(async () => { await Promise.resolve(); });
+    expect(latestState?.overlayMode).toBe('none');
+  });
+
+  it('deletes the focused word instead of its line and keeps the line selectable', async () => {
+    const wordOne = {
+      body: [{ purpose: 'supplementing', type: 'TextualBody', value: 'one' }],
+      id: 'word-1',
+      target: `${canvasId}#xywh=pixel:10,10,40,20`,
+      textGranularity: 'word',
+      type: 'Annotation',
+    };
+    const wordTwo = { ...wordOne, body: [{ purpose: 'supplementing', type: 'TextualBody', value: 'line' }], id: 'word-2', target: `${canvasId}#xywh=pixel:60,10,50,20` };
+    const canonicalPage = { ...page(), items: [line(), wordOne, wordTwo] };
+    const adapter = {
+      itemImageId: '41',
+      loadSnapshot: vi.fn(async () => ({ page: canonicalPage, revision: '1' })),
+    };
+    let latestState;
+    editorStateListener = (event) => {
+      latestState = event.detail;
+    };
+    document.addEventListener('scribe:editor-state', editorStateListener);
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    await act(async () => root.render(<ScribeCompanionWindow
+      adapterFactory={() => adapter}
+      canvasId={canvasId}
+      id="companion-1"
+      isFocusedWindow
+      receiveAnnotation={vi.fn()}
+      selectAnnotation={vi.fn()}
+      selectedAnnotationId="line-1"
+      serverPage={canonicalPage}
+      windowId={windowId}
+    />));
+    await vi.waitFor(() => expect(latestState?.sessionStatus).toBe('ready'));
+    await act(async () => document.dispatchEvent(new CustomEvent('scribe:select-annotation', {
+      detail: { annotationId: 'line-1', canvasId, focusAnnotationId: 'word-2', windowId },
+    })));
+    await vi.waitFor(() => expect(latestState?.focusedWordAnnotationId).toBe('word-2'));
+
+    const deleteAction = container.querySelector("button[aria-label='Delete the word \"line\"']");
+    expect(deleteAction).not.toBeNull();
+    await act(async () => deleteAction?.click());
+
+    await vi.waitFor(() => expect(latestState?.annotationPage?.items.map(({ id }) => id)).toEqual(['line-1', 'word-1']));
+    const remainingLine = latestState.annotationPage.items.find(({ id }) => id === 'line-1');
+    expect(remainingLine.body[0].value).toBe('one');
+    expect(latestState?.statusMessage).toContain('Word deleted');
+  });
+
+  it('publishes edit metrics with the server correction after a successful save', async () => {
+    const canonicalPage = page();
+    const savedRevision = '2';
+    const adapter = {
+      itemImageId: '41',
+      loadSnapshot: vi.fn(async () => ({ page: canonicalPage, revision: '1' })),
+      savePage: vi.fn(async (submitted) => ({
+        correction: { baselineCharacters: 8, correctedCharacters: 8, levenshteinDistance: 2 },
+        page: submitted,
+        revision: savedRevision,
+      })),
+    };
+    let latestState;
+    editorStateListener = (event) => {
+      latestState = event.detail;
+    };
+    document.addEventListener('scribe:editor-state', editorStateListener);
+    const metricsEvents = [];
+    const handleMetrics = (event) => metricsEvents.push(event.detail);
+    document.addEventListener('scribe:edit-metrics', handleMetrics);
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    await act(async () => root.render(<ScribeCompanionWindow
+      adapterFactory={() => adapter}
+      canvasId={canvasId}
+      id="companion-1"
+      isFocusedWindow
+      receiveAnnotation={vi.fn()}
+      selectAnnotation={vi.fn()}
+      selectedAnnotationId="line-1"
+      serverPage={canonicalPage}
+      windowId={windowId}
+    />));
+    await vi.waitFor(() => expect(latestState?.sessionStatus).toBe('ready'));
+    await act(async () => document.dispatchEvent(new CustomEvent('scribe:inline-change-text', {
+      detail: { canvasId, text: 'one lime', windowId },
+    })));
+    await act(async () => document.dispatchEvent(new CustomEvent('scribe:resize-annotation', {
+      detail: { annotationId: 'line-1', bbox: { h: 20, w: 100, x: 12, y: 10 }, canvasId, operation: 'move', windowId },
+    })));
+    await vi.waitFor(() => expect(latestState?.saveDisabled).toBe(false));
+
+    await act(async () => container.querySelector('button[aria-label="scribeEditorSave"]')?.click());
+    await vi.waitFor(() => expect(metricsEvents).toHaveLength(1));
+
+    expect(adapter.savePage).toHaveBeenCalledOnce();
+    expect(metricsEvents[0]).toEqual({
+      canvasId,
+      correction: { baselineCharacters: 8, correctedCharacters: 8, levenshteinDistance: 2 },
+      itemImageId: '41',
+      metrics: expect.objectContaining({
+        boxesMoved: 1,
+        changedAnnotationIds: ['line-1'],
+        characterDistance: 1,
+        linesRetyped: 1,
+      }),
+      operations: { 'box-move': 1, 'text-edit': 1 },
+      revision: savedRevision,
+      summary: '1 line retyped, 1 box moved',
+      windowId,
+    });
+    await vi.waitFor(() => expect(latestState?.statusMessage).toBe('Saved page: 1 line retyped, 1 box moved.'));
+    document.removeEventListener('scribe:edit-metrics', handleMetrics);
+  });
+
+  it('creates a word from the W shortcut and requests a centred line from N', async () => {
+    const canonicalPage = page();
+    const adapter = {
+      itemImageId: '41',
+      loadSnapshot: vi.fn(async () => ({ page: canonicalPage, revision: '1' })),
+    };
+    let latestState;
+    editorStateListener = (event) => {
+      latestState = event.detail;
+    };
+    document.addEventListener('scribe:editor-state', editorStateListener);
+    const lineRequests = [];
+    const handleLineRequest = (event) => lineRequests.push(event.detail);
+    document.addEventListener('scribe:create-line-at-viewport-center', handleLineRequest);
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    await act(async () => root.render(<ScribeCompanionWindow
+      adapterFactory={() => adapter}
+      canvasId={canvasId}
+      id="companion-1"
+      isFocusedWindow
+      receiveAnnotation={vi.fn()}
+      selectAnnotation={vi.fn()}
+      selectedAnnotationId="line-1"
+      serverPage={canonicalPage}
+      windowId={windowId}
+    />));
+    await vi.waitFor(() => expect(latestState?.sessionStatus).toBe('ready'));
+
+    await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'w' })));
+    await vi.waitFor(() => expect(latestState?.annotationPage?.items).toHaveLength(2));
+    expect(latestState.annotationPage.items[1].textGranularity).toBe('word');
+    expect(latestState?.overlayMode).toBe('edit');
+
+    await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'n' })));
+    expect(lineRequests).toEqual([{ canvasId, windowId }]);
+
+    // Typing inside a text field never triggers creation shortcuts.
+    const input = document.createElement('input');
+    document.body.appendChild(input);
+    await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'n' })));
+    expect(lineRequests).toHaveLength(1);
+    input.remove();
+    document.removeEventListener('scribe:create-line-at-viewport-center', handleLineRequest);
   });
 
   it('restores the selected draft when redo brings a created line back', async () => {

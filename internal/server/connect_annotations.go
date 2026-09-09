@@ -34,7 +34,7 @@ func (h *Handler) GetAnnotationPage(ctx context.Context, req *connect.Request[sc
 }
 
 func (h *Handler) SaveAnnotationPage(ctx context.Context, req *connect.Request[scribev1.SaveAnnotationPageRequest]) (*connect.Response[scribev1.SaveAnnotationPageResponse], error) {
-	page, err := h.saveCanonicalAnnotationPage(
+	page, metric, err := h.saveCanonicalAnnotationPage(
 		ctx,
 		req.Msg.GetItemImageId(),
 		req.Msg.GetAnnotationPageJson(),
@@ -49,6 +49,7 @@ func (h *Handler) SaveAnnotationPage(ctx context.Context, req *connect.Request[s
 		AnnotationPageJson: page.Payload,
 		Revision:           page.Revision,
 		UpdatedAt:          page.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		Correction:         annotationCorrectionMetricResponse(metric),
 	}), nil
 }
 
@@ -377,5 +378,19 @@ func annotationEnrichmentConnectError(err error) error {
 		return connect.NewError(connect.CodeUnavailable, fmt.Errorf("transcription provider is temporarily unavailable"))
 	default:
 		return connect.NewError(connect.CodeInternal, fmt.Errorf("annotation enrichment failed"))
+	}
+}
+
+// annotationCorrectionMetricResponse maps the store metric onto the API. A
+// nil metric means the page has no OCR baseline, so the field is omitted
+// rather than reported as a zero distance.
+func annotationCorrectionMetricResponse(metric *store.AnnotationCorrectionMetric) *scribev1.AnnotationCorrectionMetric {
+	if metric == nil {
+		return nil
+	}
+	return &scribev1.AnnotationCorrectionMetric{
+		LevenshteinDistance: int32FromIntBounded(metric.LevenshteinDistance),
+		BaselineCharacters:  int32FromIntBounded(metric.BaselineCharacters),
+		CorrectedCharacters: int32FromIntBounded(metric.CorrectedCharacters),
 	}
 }

@@ -13,8 +13,10 @@ import {
 import { editorBridgeEventDetail, useDocumentEvent } from './useDocumentEvent';
 
 /** @typedef {import('../types/scribe').EditorRow} EditorRow */
+/** @typedef {import('../types/scribe').EditOperationKind} EditOperationKind */
 /** @typedef {import('../types/scribe').IIIFAnnotation} IIIFAnnotation */
 /** @typedef {import('../types/scribe').IIIFAnnotationPage} IIIFAnnotationPage */
+/** @typedef {import('../types/scribe').ScribeOverlayMode} OverlayMode */
 
 /**
  * Routes inline-overlay editing events for exactly one Mirador window and
@@ -27,12 +29,13 @@ import { editorBridgeEventDetail, useDocumentEvent } from './useDocumentEvent';
  * @param {() => void | Promise<void>} options.handleSave
  * @param {IIIFAnnotationPage | null} options.localPage
  * @param {(page: IIIFAnnotationPage) => void} options.pushHistory
+ * @param {(kind: EditOperationKind) => void} [options.recordOperation]
  * @param {IIIFAnnotation | null} options.selectedAnnotation
  * @param {(windowId: string, annotationId: string) => unknown} options.selectAnnotation
  * @param {IIIFAnnotationPage | null} options.serverPage
  * @param {(active: boolean) => void} options.setDrawMode
  * @param {(annotationId: string) => void} options.setFocusedWordAnnotationId
- * @param {(mode: 'edit') => void} options.setOverlayMode
+ * @param {(mode: OverlayMode) => void} options.setOverlayMode
  * @param {(message: string) => void} options.setStatusMessage
  * @param {EditorRow[]} options.visibleRows
  * @param {string} options.windowId
@@ -44,6 +47,7 @@ export function useInlineEditorBridge({
   handleSave,
   localPage,
   pushHistory,
+  recordOperation = () => {},
   selectedAnnotation,
   selectAnnotation,
   serverPage,
@@ -54,11 +58,17 @@ export function useInlineEditorBridge({
   visibleRows,
   windowId,
 }) {
-  /** @param {string} text @param {number | null | undefined} selectionStart */
-  function changeText(text, selectionStart) {
+  /**
+   * @param {string} text
+   * @param {number | null | undefined} selectionStart
+   * @param {string} [annotationId] Row to edit; defaults to the current selection.
+   */
+  function changeText(text, selectionStart, annotationId = '') {
     if (!localPage || editingIsBlocked()) return;
-    const targetRow = findEditorRowByAnnotationId(localPage, effectiveSelectedAnnotationId)
-      || findEditorRowByAnnotationId(localPage, selectedAnnotation?.id || '');
+    const targetRow = annotationId
+      ? findEditorRowByAnnotationId(localPage, annotationId)
+      : findEditorRowByAnnotationId(localPage, effectiveSelectedAnnotationId)
+        || findEditorRowByAnnotationId(localPage, selectedAnnotation?.id || '');
     if (!targetRow) return;
 
     if (targetRow.granularity === 'word') {
@@ -72,8 +82,12 @@ export function useInlineEditorBridge({
       const targetId = rowSelectionId(targetRow);
       const targetAnnotation = (localPage.items || []).find((annotation) => annotation?.id === targetId);
       if (!targetAnnotation) return;
+      if (annotationId && targetId && targetId !== effectiveSelectedAnnotationId) {
+        selectAnnotation(windowId, targetId);
+      }
       pushHistory(upsertAnnotationInPage(localPage, updateAnnotationText(targetAnnotation, text)));
     }
+    recordOperation('text-edit');
     setStatusMessage('');
   }
 
@@ -88,13 +102,14 @@ export function useInlineEditorBridge({
     pushHistory(synchronizeLineTextFromWords(nextPage, changedWord));
     setFocusedWordAnnotationId(annotationId);
     selectAnnotation(windowId, annotationId);
+    recordOperation('text-edit');
     setStatusMessage('');
   }
 
   useDocumentEvent('scribe:inline-change-text', (event) => {
     const detail = editorBridgeEventDetail(event);
     if (detail.windowId !== windowId || detail.canvasId !== canvasId) return;
-    changeText(detail.text || '', detail.selectionStart);
+    changeText(detail.text || '', detail.selectionStart, detail.annotationId || '');
   });
 
   useDocumentEvent('scribe:inline-change-word', (event) => {
@@ -136,7 +151,10 @@ export function useInlineEditorBridge({
     const clickedAnnotation = (sourcePage?.items || [])
       .find((annotation) => annotation?.id === detail.annotationId) || null;
     setDrawMode(false);
-    setOverlayMode('edit');
+    // A selection made from the image always lands in an editable mode. The
+    // transcript pane keeps its own mode; every other origin opens the inline
+    // editor so the clicked word can be changed immediately.
+    setOverlayMode(detail.overlayMode === 'transcript' ? 'transcript' : 'edit');
     setFocusedWordAnnotationId(detail.focusAnnotationId
       || (clickedAnnotation && isWordAnnotation(clickedAnnotation) ? clickedAnnotation.id || '' : ''));
     selectAnnotation(windowId, detail.focusAnnotationId || detail.annotationId);
@@ -151,5 +169,6 @@ export function useInlineEditorBridge({
     const annotation = (localPage.items || []).find((item) => item?.id === annotationId);
     if (!annotation) return;
     pushHistory(upsertAnnotationInPage(localPage, updateAnnotationBBox(annotation, bbox)));
+    recordOperation(detail.operation === 'move' ? 'box-move' : 'box-resize');
   });
 }
