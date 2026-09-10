@@ -285,6 +285,36 @@ test("a production SSE completion rebases the mounted dirty editor through Conne
   expect(await inputValues()).toEqual(dirtyInputValues);
 });
 
+test("a completed full editor keeps every action visible across viewport sizes", async ({ page }) => {
+  const itemImageId = process.env.VITE_SCRIBE_BROWSER_ITEM_IMAGE_ID ?? "";
+  test.skip(!/^[1-9][0-9]*$/.test(itemImageId), "requires the browser Connect fixture");
+  test.setTimeout(120_000);
+
+  expect((await page.request.post("/v1/__browser-fixture/reset-background-transcription")).ok()).toBe(true);
+  expect((await page.request.post("/v1/__browser-fixture/complete-background-transcription")).ok()).toBe(true);
+  const manifestResponse = await page.request.post("/scribe.v1.ItemService/GetEditorManifest", {
+    data: { itemImageId },
+    headers: { "Connect-Protocol-Version": "1", "X-Scribe-Workspace-ID": "1" },
+  });
+  expect(manifestResponse.ok()).toBe(true);
+  const { item } = await manifestResponse.json();
+
+  await page.setViewportSize({ width: 360, height: 800 });
+  await page.goto(`/editor?itemId=${encodeURIComponent(item.id)}&itemImageId=${itemImageId}&workspace_id=1`);
+  await expect(page.locator("#editor-transcription-status")).toContainText("Batch transcription complete", {
+    timeout: 60_000,
+  });
+  for (const [width, height, minimumImageHeight] of [
+    [360, 800, 160],
+    [667, 375, 60],
+    [768, 1024, 220],
+    [1440, 900, 220],
+  ]) {
+    await page.setViewportSize({ width, height });
+    await assertResponsiveEditorGeometry(page, width, height, minimumImageHeight);
+  }
+});
+
 test("page save reloads cleanly and a stale editor retains its draft on conflict", async ({ page }) => {
   await page.goto("/e2e/harness.html?mode=session");
   await waitForHarness(page);

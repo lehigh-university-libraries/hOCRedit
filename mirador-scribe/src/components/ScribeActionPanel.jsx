@@ -81,9 +81,11 @@ export const shortcutLegendSx = {
 
 export const compactToolbarActionSx = {
   [compactEditorMedia]: {
+    lineHeight: 1.5,
     minHeight: 30,
     minWidth: 34,
     px: 0.5,
+    py: 0.25,
     '& .MuiButton-startIcon': {
       m: 0,
     },

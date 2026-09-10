@@ -7,6 +7,8 @@ artifacts.
 The editor gives action buttons most of the toolbar width. The keyboard shortcut
 key stays compact beside them, wraps below on narrow screens, and hides when
 the viewport is too short.
+Compact buttons set their line height and vertical padding explicitly so the
+complete toolbar fits even when the editor header shows a transcription status.
 
 Keep the plugin thin:
 
@@ -108,7 +110,10 @@ its owning line and a line to the canonical image (`clampBBoxWithin`), and the
 `transcript` mode reserves the right side of the viewer through OpenSeadragon
 viewport margins and renders one editable row per visible line at the same
 viewer y coordinate and height as its image line, so rows track pan and zoom.
-Row edits emit `scribe:inline-change-text` with the row's `annotationId`.
+The row text uses IBM Plex Sans (with Helvetica Neue and sans-serif fallbacks)
+at 15 px at every image zoom level (`TRANSCRIPT_FONT_FAMILY` and
+`TRANSCRIPT_FONT_SIZE_PX`); only the row geometry scales, with a minimum height
+of 18 px. Row edits emit `scribe:inline-change-text` with the row's `annotationId`.
 Rows retain the complete line text even when some words are outside the viewport;
 an edit naming a retired annotation is ignored. Enter
 and the Arrow keys step rows, Ctrl/Cmd+Enter saves, and focusing a row emits

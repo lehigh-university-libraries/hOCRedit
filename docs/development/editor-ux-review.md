@@ -64,7 +64,7 @@ in the order a person meets them.
 | Finding | Decision |
 | --- | --- |
 | One button cycled through four modes and showed only the current one, so reaching a specific mode took up to three clicks and gave no overview. | An exclusive mode switch ("Off", "Edit", "Read", "Outline", "Transcript") with `aria-pressed`, tooltips describing each mode, and single-key shortcuts (Esc, E, R, T). |
-| There was no way to read the transcription as text while seeing the image, short of the small inline editor for one line. | New "Transcript" mode: the image keeps the left of the viewer and a pane on the right lists one editable row per visible line, positioned at the same viewer y coordinate and height as its image line, so rows track pan and zoom. The pane reserves its width through OpenSeadragon viewport margins, so coordinate conversion stays exact. Focusing a row selects the line and pans (never re-zooms) only when the line is out of view. |
+| There was no way to read the transcription as text while seeing the image, short of the small inline editor for one line. | New "Transcript" mode: the image keeps the left of the viewer and a pane on the right lists one editable row per visible line, positioned at the same viewer y coordinate and height as its image line, so rows track pan and zoom. The text keeps one typeface and size at every zoom; only the row geometry scales. The pane reserves its width through OpenSeadragon viewport margins, so coordinate conversion stays exact. Focusing a row selects the line and pans (never re-zooms) only when the line is out of view. |
 
 ### Metrics
 
@@ -111,3 +111,6 @@ that never silently truncate long-line edits.
   deployed readiness also verifies the saved canonical annotations.
   Local Chromium and deployed readiness share save-success and responsive
   geometry checks, including visibility of all 18 primary toolbar actions.
+  The DB-backed full-editor check retains the completed-transcription status
+  while resizing through the deployed viewports, so header content and inherited
+  button spacing cannot silently clip the toolbar in landscape.
