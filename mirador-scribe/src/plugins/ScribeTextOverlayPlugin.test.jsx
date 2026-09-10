@@ -473,6 +473,28 @@ describe('ScribeTextOverlayPlugin interaction', () => {
     expect(rows.map((row) => row.style.height)).toEqual(['24px', '30px']);
     expect(rows[0].getAttribute('aria-label')).toBe('Transcript line 1: first line');
 
+    vi.useFakeTimers({ toFake: ['requestAnimationFrame', 'cancelAnimationFrame'] });
+    const updateViewport = mountedViewer.addHandler.mock.calls.find(([name]) => name === 'update-viewport')[1];
+    for (const [scale, tops, heights] of [
+      [1, ['30px', '90px'], ['24px', '30px']],
+      [0.5, ['15px', '45px'], ['18px', '18px']],
+      [2, ['60px', '180px'], ['48px', '60px']],
+    ]) {
+      mountedViewer.viewport.pixelFromPoint = ({ x, y }) => ({ x: x * scale, y: y * scale });
+      await act(async () => {
+        updateViewport();
+        vi.advanceTimersToNextFrame();
+      });
+      const zoomedRows = [...viewerCanvas.querySelectorAll('input[data-scribe-transcript-row]')];
+      expect(zoomedRows.map((row) => row.style.top)).toEqual(tops);
+      expect(zoomedRows.map((row) => row.style.height)).toEqual(heights);
+      expect(zoomedRows.map((row) => row.style.fontSize)).toEqual(['15px', '15px']);
+      expect(zoomedRows.map((row) => row.style.fontFamily)).toEqual([
+        '"IBM Plex Sans", "Helvetica Neue", sans-serif',
+        '"IBM Plex Sans", "Helvetica Neue", sans-serif',
+      ]);
+    }
+
     const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
     await act(async () => {
       valueSetter?.call(rows[1], 'second line fixed');

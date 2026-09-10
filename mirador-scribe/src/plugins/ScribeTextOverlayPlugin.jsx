@@ -63,6 +63,9 @@ const TRANSCRIPT_PANE_MIN_WIDTH_PX = 260;
 const TRANSCRIPT_PANE_MAX_WIDTH_PX = 440;
 const TRANSCRIPT_PANE_WIDTH_RATIO = 0.38;
 const TRANSCRIPT_ROW_MIN_HEIGHT_PX = 18;
+// Keep transcript text readable while row geometry follows image zoom.
+export const TRANSCRIPT_FONT_FAMILY = '"IBM Plex Sans", "Helvetica Neue", sans-serif';
+export const TRANSCRIPT_FONT_SIZE_PX = 15;
 
 /** @typedef {import('../types/scribe').ImageBBox} Rect */
 /** @typedef {import('../types/scribe').IIIFAnnotation} IIIFAnnotation */
@@ -1587,7 +1590,6 @@ export function ScribeTextOverlayPlugin({
           {transcriptRows.map((row, index) => {
             const rect = row.rect;
             const rowHeight = Math.max(TRANSCRIPT_ROW_MIN_HEIGHT_PX, rect.h);
-            const fontSize = Math.max(11, Math.min(22, rect.h * 0.62));
             return (
               <input
                 aria-label={`Transcript line ${index + 1}: ${row.text || 'empty text'}`}
@@ -1646,8 +1648,8 @@ export function ScribeTextOverlayPlugin({
                   borderLeft: `3px solid ${row.selected ? scribeTheme.word : 'transparent'}`,
                   boxSizing: 'border-box',
                   color: row.selected ? scribeTheme.selectedForeground : scribeTheme.foreground,
-                  fontFamily: '"IBM Plex Sans", "Helvetica Neue", sans-serif',
-                  fontSize: `${fontSize}px`,
+                  fontFamily: TRANSCRIPT_FONT_FAMILY,
+                  fontSize: `${TRANSCRIPT_FONT_SIZE_PX}px`,
                   fontWeight: 500,
                   height: `${rowHeight}px`,
                   left: 0,
